@@ -13,6 +13,7 @@ import (
 // grow here as the C backend matures.
 func phase10Backend(m *mir.Module) []Error {
 	var errs []Error
+	frames, _ := buildFrameInventory(m)
 	envRecords := closureEnvRecords(m)
 	for i := range m.Imports {
 		if !validCExternalName(m.Imports[i].Name) {
@@ -54,6 +55,17 @@ func phase10Backend(m *mir.Module) []Error {
 				loc := locInstr(f, b, i, in)
 				switch in.Op {
 				case mir.OpAlloc, mir.OpAllocChecked:
+					if frames != nil {
+						if _, isFrame := frames.frameOf(in.TypeOp); isFrame {
+							if frames.frameStepOf(f) == nil {
+								errs = append(errs, Error{Loc: loc, Msg: "a frame may be allocated only inside a step function"})
+							}
+							if !frameConstantOne(m, f, in.Count) {
+								errs = append(errs, Error{Loc: loc, Msg: "a frame allocation requires the constant count 1"})
+							}
+							break
+						}
+					}
 					for _, k := range []mir.TypeKind{mir.TypeDomainHandle, mir.TypeDomainMark,
 						mir.TypeCleanupScope, mir.TypeCleanupID, mir.TypeTableView, mir.TypeTableMutView,
 						mir.TypeRawPtr, mir.TypeCRaw, mir.TypeCPtr, mir.TypeCConstPtr, mir.TypeCNamed,
@@ -70,6 +82,10 @@ func phase10Backend(m *mir.Module) []Error {
 						}
 					}
 				case mir.OpTableCreate:
+					if frames != nil && frames.containsFrameType(m, in.TypeOp) {
+						errs = append(errs, Error{Loc: loc, Msg: "table element type may not contain a frame type"})
+						break
+					}
 					for _, k := range []mir.TypeKind{mir.TypeDomainHandle, mir.TypeDomainMark,
 						mir.TypeCleanupScope, mir.TypeCleanupID, mir.TypeTableView, mir.TypeTableMutView,
 						mir.TypeRawPtr, mir.TypeCRaw, mir.TypeCPtr, mir.TypeCConstPtr, mir.TypeCNamed,
@@ -82,6 +98,10 @@ func phase10Backend(m *mir.Module) []Error {
 				case mir.OpCopyToDomain:
 					t, ok := f.ValueType(in.CopyVal)
 					if !ok {
+						break
+					}
+					if frames != nil && frames.containsFrameType(m, t) {
+						errs = append(errs, Error{Loc: loc, Msg: "copy_to_domain source type may not contain a frame type"})
 						break
 					}
 					for _, k := range []mir.TypeKind{mir.TypeDomainHandle, mir.TypeDomainMark,
@@ -126,6 +146,11 @@ func validCExternalName(name string) bool {
 // underscore (implementation namespace), non-identifier characters, C
 // keywords, and the alder_-prefixed runtime namespace.
 func validCBindingName(name string) bool {
+	if name == "alder_task_cancelled" {
+		// The amended frame contract pins one runtime entry as a binding
+		// call target: the executor's cancellation observation.
+		return true
+	}
 	if name == "" || name[0] == '_' {
 		return false
 	}

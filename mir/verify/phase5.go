@@ -12,6 +12,10 @@ import (
 // against the types inferred from the operation.
 func phase5Typing(m *mir.Module) []Error {
 	var errs []Error
+	frames, frameErrs := buildFrameInventory(m)
+	if len(frameErrs) == 0 {
+		errs = append(errs, frameTypingErrors(m, frames)...)
+	}
 	for _, f := range m.Functions {
 		if f == nil || len(f.Blocks) == 0 {
 			continue

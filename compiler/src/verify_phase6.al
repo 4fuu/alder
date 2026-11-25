@@ -2301,7 +2301,7 @@ var ordinal: U64 = 0
 while ordinal < icount {
     let iid = mir_vindex_instr(indexes, function, block, ordinal)
     let x = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
-    if x.op == mir_op_store() && mir_v6_place_deref(store, x.place) { let value_type = mir_v5_value_type(store, indexes, function, x.a)
+    if x.op == mir_op_store() && mir_v6_place_deref(store, x.place) && !mir_vframe_place_frame_field(store, indexes, function, x.place) { let value_type = mir_v5_value_type(store, indexes, function, x.a)
 if try mir_v6_type_local_store(d, store, indexes, value_type) { out = try mir_v6_bad(d, out, mir_vdiag_lifetime_deref_store(), function, block, iid, 0, x.place, x.a) } }
     if x.op == mir_op_cleanup_scope_run() { out = try mir_v6_check_cleanup(d, store, indexes, cfg, dom, analysis, cleanup, state, function, block, iid, out) }
     var invalid = false

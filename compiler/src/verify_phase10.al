@@ -47,6 +47,9 @@ fn mir_v10_external_name(store: MirStore, start: U64, end: U64) -> Bool {
 // legal; a wrong spelling is caught by the generated probes. Still rejected:
 // leading underscores, C keywords, and the runtime namespace.
 fn mir_v10_binding_name(store: MirStore, start: U64, end: U64) -> Bool {
+    // The frame contract pins one runtime entry as a binding call target:
+    // the executor's cancellation observation.
+    if mir_vname_word(store, start, end, "alder_task_cancelled") { return true }
     if !mir_vname_valid(store, start, end, false) || __s0_buffer_get(U8, store.names, start) == 95 { return false }
     if mir_v10_name_prefix(store, start, end, "alder_") || mir_v10_name_prefix(store, start, end, "ALDER_") || mir_v10_name_prefix(store, start, end, "Alder") { return false }
     return !mir_v10_name_list(store, start, end, "_Alignas,_Alignof,_Atomic,_Bool,_Complex,_Generic,_Imaginary,_Noreturn,_Static_assert,_Thread_local,auto,break,case,char,const,continue,default,do,double,else,enum,extern,float,for,goto,if,inline,int,long,register,restrict,return,short,signed,sizeof,static,struct,switch,typedef,union,unsigned,void,volatile,while")
@@ -135,17 +138,24 @@ fn mir_v10_forbidden_copy(d: Domain, store: MirStore, indexes: MirVIndexes, type
 }
 fn mir_vphase10(d: Domain, store: MirStore, indexes: MirVIndexes, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
     var out = initial
+    let scanned = try mir_vframe_scan(d, store, indexes)
+    let frames = scanned.scan
 var import_id: U64 = 1
     while import_id <= __s0_buffer_len(MirImportRec, store.imports) { let item = __s0_buffer_get(MirImportRec, store.imports, import_id - 1)
 if !mir_v10_external_name(store, item.name_start, item.name_end) { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_backend(), mir_vdiag_c_external_name(), 0, 0, 0, 0, 0, 0, import_id, 0, 0, import_id)) }
 import_id = import_id + 1 }
     var iid: U64 = 1
     while iid <= __s0_buffer_len(MirInstrRec, store.instructions) { let x = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
-if x.op == mir_op_alloc() || x.op == mir_op_alloc_checked() || x.op == mir_op_table_create() { let forbidden = try mir_v10_forbidden_element(d, store, indexes, x.type_op)
-if forbidden != 0 { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_backend(), mir_vdiag_backend_element_type(), x.function, x.block, iid, 0, 0, x.type_op, 0, 0, forbidden, x.type_op)) } }
+if x.op == mir_op_alloc() || x.op == mir_op_alloc_checked() { if frames.reserved && mir_vframe_is_frame(frames, x.type_op) {
+        if !mir_vframe_function_is_step(store, x.function) { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_backend(), mir_vdiag_frame_alloc_site(), x.function, x.block, iid, 0, 0, x.type_op, 0, 0, 0, x.type_op)) }
+        if !mir_vframe_const_one(store, indexes, x.function, x.b) { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_backend(), mir_vdiag_frame_alloc_count(), x.function, x.block, iid, 0, 0, x.type_op, 0, 0, 0, x.type_op)) }
+    } else { let forbidden = try mir_v10_forbidden_element(d, store, indexes, x.type_op)
+        if forbidden != 0 { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_backend(), mir_vdiag_backend_element_type(), x.function, x.block, iid, 0, 0, x.type_op, 0, 0, forbidden, x.type_op)) } } }
+if x.op == mir_op_table_create() { if frames.reserved && try mir_vframe_type_contains(d, frames, store, indexes, x.type_op) { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_backend(), mir_vdiag_frame_alloc_site(), x.function, x.block, iid, 0, 0, x.type_op, 0, 0, 0, x.type_op)) } else { let forbidden = try mir_v10_forbidden_element(d, store, indexes, x.type_op)
+    if forbidden != 0 { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_backend(), mir_vdiag_backend_element_type(), x.function, x.block, iid, 0, 0, x.type_op, 0, 0, forbidden, x.type_op)) } } }
 if x.op == mir_op_copy_to_domain() { let copied_type = mir_v5_value_type(store, indexes, x.function, x.b)
-let forbidden = try mir_v10_forbidden_copy(d, store, indexes, copied_type)
-if forbidden != 0 { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_backend(), mir_vdiag_copy_source_type(), x.function, x.block, iid, 0, 0, copied_type, 0, 0, forbidden, copied_type)) } }
+if frames.reserved && try mir_vframe_type_contains(d, frames, store, indexes, copied_type) { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_backend(), mir_vdiag_frame_alloc_site(), x.function, x.block, iid, 0, 0, copied_type, 0, 0, 0, copied_type)) } else { let forbidden = try mir_v10_forbidden_copy(d, store, indexes, copied_type)
+    if forbidden != 0 { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_backend(), mir_vdiag_copy_source_type(), x.function, x.block, iid, 0, 0, copied_type, 0, 0, forbidden, copied_type)) } } }
 iid = iid + 1 }
     return mir_v10_bindings(d, store, out)
 }

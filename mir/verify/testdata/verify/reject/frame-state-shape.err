@@ -1,0 +1,1 @@
+type @__alder_step.state.x.Evented: state enum must number resume variants contiguously from resume0

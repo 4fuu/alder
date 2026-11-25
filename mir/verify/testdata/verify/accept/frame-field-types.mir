@@ -1,0 +1,120 @@
+mir 6
+
+# Frame field coverage: the child frame carries a borrowed p0/o0 pair (its
+# owner field is required by the borrowed parameter), and the parent saves and
+# restores a frame-resident domain handle, local value, and aggregate temp
+# across a park suspension.
+
+const @one: u64 = 1
+const @false: bool = false
+
+type @Pair {
+  a: u64
+  b: u64
+}
+
+enum @__alder_step.status {
+  done
+  call
+  park
+  cancelled
+}
+
+enum @__alder_step.state.child.Evented {
+  entry
+}
+
+type @__alder_step.frame.child.Evented {
+  state: @__alder_step.state.child.Evented
+  p0: safe_mut(u64)
+  o0: domain_handle
+  out: u64
+}
+
+enum @__alder_step.state.parent.Evented {
+  entry
+  resume0
+}
+
+type @__alder_step.frame.parent.Evented {
+  state: @__alder_step.state.parent.Evented
+  p0: u64
+  d0: domain_handle
+  l0: u64
+  v0: @Pair
+  out: u64
+}
+
+binding @runtime "alder.h" {
+  c_fn @task_cancelled = "alder_task_cancelled"() -> bool
+}
+
+fn @__alder_step.run.child.Evented(%d: domain_handle, %frame: safe_mut(@__alder_step.frame.child.Evented), %frame_owner: domain_handle) -> @__alder_step.status {
+bb0:
+  %state = load field(deref %frame, state)
+  switch %state {
+    entry -> bb_entry
+  }
+
+bb_entry:
+  %one = const.get @one
+  store field(deref %frame, out), %one
+  %done = enum.construct @__alder_step.status, done
+  return %done
+}
+
+fn @__alder_step.run.parent.Evented(%d: domain_handle, %frame: safe_mut(@__alder_step.frame.parent.Evented), %frame_owner: domain_handle) -> @__alder_step.status {
+  local %pair: @Pair
+
+bb0:
+  %state = load field(deref %frame, state)
+  switch %state {
+    entry -> bb_entry
+    resume0 -> bb_resume0
+  }
+
+bb_entry:
+  %cancelled = c.call.unsafe @runtime.task_cancelled()
+  branch %cancelled, bb_cancel0, bb_setup
+
+bb_setup:
+  %p0 = load field(deref %frame, p0)
+  %d0 = domain.create %frame_owner
+  %pair = aggregate.construct @Pair { a: %p0, b: %p0 }
+  %resume = enum.construct @__alder_step.state.parent.Evented, resume0
+  store field(deref %frame, state), %resume
+  store field(deref %frame, d0), %d0
+  store field(deref %frame, l0), %p0
+  store field(deref %frame, v0), %pair
+  %park = enum.construct @__alder_step.status, park
+  return %park
+
+bb_resume0:
+  %cancelled0 = c.call.unsafe @runtime.task_cancelled()
+  branch %cancelled0, bb_cancel1, bb_after
+
+bb_after:
+  %d0b = load field(deref %frame, d0)
+  %l0b = load field(deref %frame, l0)
+  %v0b = load field(deref %frame, v0)
+  store local %pair, %v0b
+  %a = load field(local %pair, a)
+  %total = int.add.checked %l0b, %a else bb_overflow
+  domain.destroy %d0b
+  store field(deref %frame, out), %total
+  %done = enum.construct @__alder_step.status, done
+  return %done
+
+bb_overflow:
+  panic
+
+bb_cancel0:
+  %st0 = enum.construct @__alder_step.status, cancelled
+  return %st0
+
+bb_cancel1:
+  %d0c = load field(deref %frame, d0)
+  domain.destroy %d0c
+  %st1 = enum.construct @__alder_step.status, cancelled
+  return %st1
+}

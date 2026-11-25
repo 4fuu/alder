@@ -1,0 +1,3 @@
+fn @caller: block bb0: op call #2: a step function is entered only through the executor trampoline
+fn @caller: block bb0: op call #2: a frame view may not escape its activation
+fn @caller: block bb0: op alloc #1: a frame may be allocated only inside a step function

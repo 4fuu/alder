@@ -1,0 +1,3 @@
+fn @__alder_step.run.size.Evented: block bb_resume0: state resume0 must load exactly the saved frame fields in frame order
+fn @__alder_step.run.size.Evented: block bb_call0: terminator return: call requires the suspend block to save x0 and y0
+fn @__alder_step.run.size.Evented: block bb_call0: op alloc #2: a frame allocation must be stored exactly once into the allocating step's x<i> field

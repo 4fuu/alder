@@ -35,6 +35,9 @@ type resourceState struct {
 
 func phase6Domains(m *mir.Module, effects []functionEffect, cleanups []*cleanupAnalysis, domainInfos [][]domainInfo) []Error {
 	var errs []Error
+	frames, _ := buildFrameInventory(m)
+	errs = append(errs, frameStateErrors(m, frames)...)
+	errs = append(errs, frameAllocationErrors(m, frames)...)
 	envRecords := closureEnvRecords(m)
 	for fi, f := range m.Functions {
 		if f == nil || len(f.Blocks) == 0 {
@@ -59,7 +62,7 @@ func phase6Domains(m *mir.Module, effects []functionEffect, cleanups []*cleanupA
 				loc := locInstr(f, b, ii, in)
 				if in.Op == mir.OpStore {
 					if _, deref := placeDerefRoot(&in.Place); deref {
-						if stored, ok := f.ValueType(in.StoreVal); ok && typeRequiresLocalStore(m, stored, envRecords) {
+						if stored, ok := f.ValueType(in.StoreVal); ok && typeRequiresLocalStore(m, stored, envRecords) && !frameFieldStore(m, frames, f, &in.Place) {
 							errs = append(errs, Error{Loc: loc, Msg: "lifetime-bearing values may not be stored through dereference places in the current MIR profile"})
 						}
 					}
@@ -498,6 +501,26 @@ func transferDomain(m *mir.Module, f *mir.Function, vid mir.ValueId, info []doma
 			// domain: a later reset or destroy of the domain cannot dangle
 			// plain bits. Storage-carrying types keep the merges below.
 			return changed
+		}
+		// A frame field load keeps the direct identity anchored to the
+		// (activation, field) pair. Only stores through that same frame field
+		// feed it; a field with no local store is initialized by the caller
+		// (p/o/state) or by the owning child function (a callee frame), so it
+		// inherits the frame view's own provenance.
+		field, deref, isField := frameFieldPlace(&in.Place)
+		if isField {
+			base, baseOK := f.ValueType(deref)
+			if baseOK && containsReservedFrameDeclaration(m, base) {
+				stores := frameFieldStores(f, deref, field)
+				if len(stores) == 0 {
+					merge(deref)
+				} else {
+					for _, stored := range stores {
+						merge(stored)
+					}
+				}
+				return changed
+			}
 		}
 		if in.Place.Kind == mir.PlaceDeref {
 			merge(in.Place.Deref)

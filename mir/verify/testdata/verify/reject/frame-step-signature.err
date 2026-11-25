@@ -1,0 +1,5 @@
+fn @__alder_step.run.x.Evented: step function must have the pinned three-parameter signature
+type @__alder_step.frame.x.Evented: frame type must be the frame of exactly one step function
+type @__alder_step.status: reserved status enum requires at least one step function
+fn @__alder_step.run.x.Evented: frame types may not appear in ordinary declarations
+fn @__alder_step.run.x.Evented: safe_mut parameter requires an owner domain parameter

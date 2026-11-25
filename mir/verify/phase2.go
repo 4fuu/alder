@@ -3,6 +3,7 @@ package verify
 import (
 	"fmt"
 	"math"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/4fuu/alder/mir"
@@ -13,23 +14,37 @@ import (
 // declaration positions, and constant values that fit their declared types.
 func phase2Types(m *mir.Module) []Error {
 	var errs []Error
+	frames, frameErrs := buildFrameInventory(m)
+	errs = append(errs, frameErrs...)
 	for i := range m.Types {
 		id := mir.TypeId(i)
-		errs = append(errs, checkTypeEntry(m, id, &m.Types[i])...)
+		errs = append(errs, checkTypeEntry(m, frames, id, &m.Types[i])...)
 	}
 	for i := range m.Types {
 		errs = append(errs, checkTypeCycle(m, mir.TypeId(i), &m.Types[i])...)
 	}
 	for _, c := range m.Constants {
 		errs = append(errs, checkConst(m, &c)...)
+		if frames.containsFrameType(m, c.Type) {
+			errs = append(errs, Error{Loc: "const @" + c.Name, Msg: "frame types may not appear in ordinary declarations"})
+		}
 	}
 	for i := range m.Imports {
-		errs = append(errs, checkSigDecl(m, fmt.Sprintf("import @%s", m.Imports[i].Name), m.Imports[i].Sig)...)
+		loc := fmt.Sprintf("import @%s", m.Imports[i].Name)
+		errs = append(errs, checkSigDecl(m, loc, m.Imports[i].Sig)...)
+		errs = append(errs, checkFrameSigUse(m, frames, nil, loc, m.Imports[i].Sig)...)
 	}
 	for bi := range m.Bindings {
 		for i := range m.Bindings[bi].Funcs {
 			fn := &m.Bindings[bi].Funcs[i]
-			errs = append(errs, checkSigDecl(m, fmt.Sprintf("binding @%s function @%s", m.Bindings[bi].Name, fn.Name), fn.Sig)...)
+			loc := fmt.Sprintf("binding @%s function @%s", m.Bindings[bi].Name, fn.Name)
+			errs = append(errs, checkSigDecl(m, loc, fn.Sig)...)
+			errs = append(errs, checkFrameSigUse(m, frames, nil, loc, fn.Sig)...)
+		}
+		for _, c := range m.Bindings[bi].Consts {
+			if frames.containsFrameType(m, c.Type) {
+				errs = append(errs, Error{Loc: fmt.Sprintf("binding @%s constant @%s", m.Bindings[bi].Name, c.Name), Msg: "frame types may not appear in ordinary declarations"})
+			}
 		}
 	}
 	for _, f := range m.Functions {
@@ -37,7 +52,9 @@ func phase2Types(m *mir.Module) []Error {
 			continue
 		}
 		loc := locFunc(f)
+		step := frames.frameStepOf(f)
 		errs = append(errs, checkSigDecl(m, loc, FuncSigOf(f))...)
+		errs = append(errs, checkFrameSigUse(m, frames, step, loc, FuncSigOf(f))...)
 		if containsKind(m, f.Result, mir.TypeDomainHandle) || containsKind(m, f.Result, mir.TypeDomainMark) {
 			errs = append(errs, Error{Loc: loc, Msg: "domain_handle and domain_mark function results are not supported until result-domain identity can be summarized"})
 		}
@@ -49,6 +66,9 @@ func phase2Types(m *mir.Module) []Error {
 				errs = append(errs, Error{Loc: loc, Msg: fmt.Sprintf("local %%%s type out of range", l.Name)})
 			}
 			errs = append(errs, checkDeclType(m, loc, "local %"+l.Name, l.Type)...)
+			if frames.containsFrameType(m, l.Type) {
+				errs = append(errs, Error{Loc: loc, Msg: fmt.Sprintf("local %%%s may not name a frame type", l.Name)})
+			}
 		}
 		for _, b := range f.Blocks {
 			if b == nil {
@@ -59,8 +79,30 @@ func phase2Types(m *mir.Module) []Error {
 					errs = append(errs, Error{Loc: locBlock(f, b), Msg: fmt.Sprintf("block parameter %%%s type out of range", p.Name)})
 				}
 				errs = append(errs, checkDeclType(m, locBlock(f, b), "block parameter %"+p.Name, p.Type)...)
+				if frames.containsFrameType(m, p.Type) {
+					errs = append(errs, Error{Loc: locBlock(f, b), Msg: fmt.Sprintf("block parameter %%%s may not name a frame type", p.Name)})
+				}
 			}
 		}
+	}
+	return errs
+}
+
+// checkFrameSigUse applies the frame type-use rule to one signature: the only
+// legal occurrence is the owning step function's borrowed frame parameter.
+func checkFrameSigUse(m *mir.Module, frames *frameInventory, step *frameStepInfo, loc string, sig mir.FuncSig) []Error {
+	var errs []Error
+	for i, p := range sig.Params {
+		if !frames.containsFrameType(m, p) {
+			continue
+		}
+		if step != nil && i == 1 && frames.isFrameView(m, p) {
+			continue
+		}
+		errs = append(errs, Error{Loc: loc, Msg: "frame types may not appear in ordinary declarations"})
+	}
+	if frames.containsFrameType(m, sig.Result) {
+		errs = append(errs, Error{Loc: loc, Msg: "frame types may not appear in ordinary declarations"})
 	}
 	return errs
 }
@@ -122,11 +164,15 @@ func ownerPairTypeError(m *mir.Module, params []mir.TypeId) string {
 	return ""
 }
 
-func checkTypeEntry(m *mir.Module, id mir.TypeId, t *mir.Type) []Error {
+func checkTypeEntry(m *mir.Module, frames *frameInventory, id mir.TypeId, t *mir.Type) []Error {
 	var errs []Error
 	loc := typeLoc(m, id)
 	if !m.ValidType(id) {
 		return nil // out-of-range entries cannot be referenced
+	}
+	frameType := false
+	if frames != nil {
+		_, frameType = frames.frameOf(id)
 	}
 	checkChild := func(child mir.TypeId, what string) {
 		if !m.ValidType(child) {
@@ -137,7 +183,9 @@ func checkTypeEntry(m *mir.Module, id mir.TypeId, t *mir.Type) []Error {
 	case mir.TypeAggregate:
 		seen := make(map[string]bool, len(t.Fields))
 		for _, fld := range t.Fields {
-			errs = append(errs, checkDeclType(m, loc, "aggregate field "+fmt.Sprintf("%q", fld.Name), fld.Type)...)
+			if !frameType {
+				errs = append(errs, checkDeclType(m, loc, "aggregate field "+fmt.Sprintf("%q", fld.Name), fld.Type)...)
+			}
 			if fld.Name == "" {
 				errs = append(errs, Error{Loc: loc, Msg: "aggregate field has an empty name"})
 				continue
@@ -150,6 +198,9 @@ func checkTypeEntry(m *mir.Module, id mir.TypeId, t *mir.Type) []Error {
 			}
 			seen[fld.Name] = true
 			checkChild(fld.Type, fmt.Sprintf("field %q", fld.Name))
+		}
+		if frames != nil && !frameType && frames.containsFrameType(m, id) {
+			errs = append(errs, Error{Loc: loc, Msg: "frame types may not be embedded in ordinary aggregate declarations"})
 		}
 	case mir.TypeEnum:
 		if len(t.Variants) == 0 {
@@ -173,6 +224,9 @@ func checkTypeEntry(m *mir.Module, id mir.TypeId, t *mir.Type) []Error {
 			}
 			seen[v.Name] = true
 			checkChild(v.Payload, fmt.Sprintf("variant %q payload", v.Name))
+		}
+		if frames != nil && frames.containsFrameType(m, id) {
+			errs = append(errs, Error{Loc: loc, Msg: "frame types may not be embedded in ordinary enum declarations"})
 		}
 	case mir.TypeOption, mir.TypeSlice, mir.TypeVec, mir.TypeSafeRef, mir.TypeSafeMut, mir.TypeArray,
 		mir.TypeRawPtr, mir.TypeTable, mir.TypeID, mir.TypeTableView, mir.TypeTableMutView:
@@ -247,7 +301,9 @@ func checkSigDecl(m *mir.Module, loc string, sig mir.FuncSig) []Error {
 
 // checkDeclType rejects ephemeral types in declaration positions: table views
 // may only appear as instruction results and operands, never in fields,
-// payloads, signatures, locals, or parameters.
+// payloads, signatures, locals, or parameters. Cleanup handles normally keep
+// direct SSA identity, but the step frame and its borrowed step parameter are
+// the pinned exception; frame shape validation owns those positions.
 func checkDeclType(m *mir.Module, loc, what string, t mir.TypeId) []Error {
 	if !m.ValidType(t) {
 		return nil // reported elsewhere
@@ -255,10 +311,33 @@ func checkDeclType(m *mir.Module, loc, what string, t mir.TypeId) []Error {
 	if containsKind(m, t, mir.TypeTableView) || containsKind(m, t, mir.TypeTableMutView) {
 		return []Error{{Loc: loc, Msg: fmt.Sprintf("%s: table views are ephemeral and may not appear in declarations", what)}}
 	}
-	if containsKind(m, t, mir.TypeCleanupScope) || containsKind(m, t, mir.TypeCleanupID) {
+	if !containsReservedFrameDeclaration(m, t) && (containsKind(m, t, mir.TypeCleanupScope) || containsKind(m, t, mir.TypeCleanupID)) {
 		return []Error{{Loc: loc, Msg: fmt.Sprintf("%s: cleanup handles require direct instruction-result SSA identity and may not appear in declarations", what)}}
 	}
 	return nil
+}
+
+// containsReservedFrameDeclaration reports whether the type tree names a
+// reserved frame aggregate. The frame shape check owns every cleanup handle and
+// checked-reference field inside it.
+func containsReservedFrameDeclaration(m *mir.Module, t mir.TypeId) bool {
+	return containsReservedFrameSeen(m, t, make(map[mir.TypeId]bool))
+}
+
+func containsReservedFrameSeen(m *mir.Module, t mir.TypeId, seen map[mir.TypeId]bool) bool {
+	if !m.ValidType(t) || seen[t] {
+		return false
+	}
+	seen[t] = true
+	if m.Types[t].Kind == mir.TypeAggregate && strings.HasPrefix(m.Types[t].Name, frameTypePrefix) {
+		return true
+	}
+	for _, child := range typeChildren(&m.Types[t]) {
+		if containsReservedFrameSeen(m, child, seen) {
+			return true
+		}
+	}
+	return false
 }
 
 // containsKind reports whether the type tree contains the given kind. Type

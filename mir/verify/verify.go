@@ -64,6 +64,9 @@ func Module(m *mir.Module) []Error {
 	effects, cleanups, domainInfos, cleanupErrs := computeFunctionEffectsWithCleanup(m)
 	errs = append(errs, phase6Domains(m, effects, cleanups, domainInfos)...)
 	errs = append(errs, cleanupErrs...)
+	if frames, frameErrs := buildFrameInventory(m); len(frameErrs) == 0 {
+		errs = append(errs, frameCleanupErrors(m, frames)...)
+	}
 	errs = append(errs, phase8Tables(m, effects, cleanups)...)
 	errs = append(errs, phase9Pointers(m)...)
 	errs = append(errs, phase10Backend(m)...)

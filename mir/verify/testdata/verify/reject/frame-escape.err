@@ -1,0 +1,2 @@
+fn @__alder_step.run.size.Evented: block bb_join: op call #1: a frame view may not escape its activation
+fn @__alder_step.run.size.Evented: block bb_join: op call #1: call argument 0: expected safe_mut(u64), got safe_mut(@__alder_step.frame.read_text.Evented)

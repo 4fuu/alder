@@ -1,0 +1,95 @@
+mir 6
+
+# The resume emission stores its scope into s1, but the suspend block saved
+# only s0. A resumed cleanup scope must be anchored to one of the state's saved
+# s<i> fields.
+
+const @one: u64 = 1
+const @false: bool = false
+const @zero: u64 = 0
+
+enum @__alder_step.status {
+  done
+  call
+  park
+  cancelled
+}
+
+enum @__alder_step.state.worker.Evented {
+  entry
+  resume0
+}
+
+type @__alder_step.frame.worker.Evented {
+  state: @__alder_step.state.worker.Evented
+  p0: u64
+  l0: u64
+  c0: cleanup_id
+  s0: cleanup_scope
+  s1: cleanup_scope
+  out: u64
+}
+
+binding @runtime "alder.h" {
+  c_fn @task_cancelled = "alder_task_cancelled"() -> bool
+}
+
+fn @hook(%owner: u64) {
+bb0:
+  return
+}
+
+fn @__alder_step.run.worker.Evented(%d: domain_handle, %frame: safe_mut(@__alder_step.frame.worker.Evented), %frame_owner: domain_handle) -> @__alder_step.status {
+bb0:
+  %state = load field(deref %frame, state)
+  switch %state {
+    entry -> bb_entry
+    resume0 -> bb_resume0
+  }
+
+bb_entry:
+  %cancelled = c.call.unsafe @runtime.task_cancelled()
+  branch %cancelled, bb_cancel0, bb_setup
+
+bb_setup:
+  %p0 = load field(deref %frame, p0)
+  store field(deref %frame, l0), %p0
+  %scope = cleanup.scope.begin
+  %resume = enum.construct @__alder_step.state.worker.Evented, resume0
+  store field(deref %frame, state), %resume
+  store field(deref %frame, s0), %scope
+  %id = cleanup.push %scope, @hook, (%p0) place field(deref %frame, l0)
+  store field(deref %frame, c0), %id
+  %park = enum.construct @__alder_step.status, park
+  return %park
+
+bb_resume0:
+  %cancelled0 = c.call.unsafe @runtime.task_cancelled()
+  branch %cancelled0, bb_cancel1, bb_after
+
+bb_after:
+  %scope2 = cleanup.scope.begin
+  store field(deref %frame, s1), %scope2
+  %id2 = load field(deref %frame, c0)
+  %s2 = load field(deref %frame, s0)
+  cleanup.disarm %id2
+  cleanup.scope.run %scope2
+  cleanup.scope.end %scope2
+  %p0b = load field(deref %frame, p0)
+  store field(deref %frame, out), %p0b
+  %done = enum.construct @__alder_step.status, done
+  return %done
+
+bb_cancel0:
+  %st_cancel0 = enum.construct @__alder_step.status, cancelled
+  return %st_cancel0
+
+bb_cancel1:
+  %scope3 = cleanup.scope.begin
+  store field(deref %frame, s0), %scope3
+  %s3 = load field(deref %frame, s0)
+  cleanup.scope.run %scope3
+  cleanup.scope.end %scope3
+  %st_cancel1 = enum.construct @__alder_step.status, cancelled
+  return %st_cancel1
+}

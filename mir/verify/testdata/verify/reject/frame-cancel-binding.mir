@@ -1,0 +1,75 @@
+mir 6
+
+# Cancellation observation is recognized by the resolved binding target, never
+# by user spelling. The resume block branches on a module function named
+# task_cancelled rather than the runtime binding, so it is not a cancellation
+# check and the state's saved l0 load is missing from the canonical path.
+
+const @false: bool = false
+
+enum @__alder_step.status {
+  done
+  call
+  park
+  cancelled
+}
+
+enum @__alder_step.state.y.Evented {
+  entry
+  resume0
+}
+
+type @__alder_step.frame.y.Evented {
+  state: @__alder_step.state.y.Evented
+  p0: u64
+  l0: u64
+  out: u64
+}
+
+binding @runtime "alder.h" {
+  c_fn @task_cancelled = "alder_task_cancelled"() -> bool
+}
+
+fn @task_cancelled() -> bool {
+bb0:
+  %f = const.get @false
+  return %f
+}
+
+fn @__alder_step.run.y.Evented(%d: domain_handle, %frame: safe_mut(@__alder_step.frame.y.Evented), %frame_owner: domain_handle) -> @__alder_step.status {
+bb0:
+  %state = load field(deref %frame, state)
+  switch %state {
+    entry -> bb_entry
+    resume0 -> bb_resume0
+  }
+
+bb_entry:
+  %cancelled = c.call.unsafe @runtime.task_cancelled()
+  branch %cancelled, bb_cancel0, bb_park
+
+bb_park:
+  %p0 = load field(deref %frame, p0)
+  %resume = enum.construct @__alder_step.state.y.Evented, resume0
+  store field(deref %frame, state), %resume
+  store field(deref %frame, l0), %p0
+  %park = enum.construct @__alder_step.status, park
+  return %park
+
+bb_resume0:
+  %spelled = call @task_cancelled()
+  branch %spelled, bb_cancel1, bb_after
+
+bb_after:
+  %saved = load field(deref %frame, l0)
+  store field(deref %frame, out), %saved
+  %done = enum.construct @__alder_step.status, done
+  return %done
+
+bb_cancel0:
+  %st0 = enum.construct @__alder_step.status, cancelled
+  return %st0
+
+bb_cancel1:
+  jump bb_after
+}

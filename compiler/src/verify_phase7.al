@@ -201,7 +201,10 @@ ordinal = ordinal + 1 }
 if live { let term_id = mir_vindex_term(indexes, function, work.block)
 if term_id != 0 {
     let t = __s0_buffer_get(MirTermRec, store.terminators, term_id - 1)
-    if (t.kind == mir_term_return() || t.kind == mir_term_fail() || t.kind == mir_term_panic()) && (status == mir_v7_open() || status == mir_v7_running()) { if !mir_v7_exit_has(exits, work.block) { exits = try __s0_buffer_append(MirV7Exit, d, exits, MirV7Exit(block: work.block, terminator: term_id)) } }
+    if (t.kind == mir_term_return() || t.kind == mir_term_fail() || t.kind == mir_term_panic()) && (status == mir_v7_open() || status == mir_v7_running()) {
+        var skip = false
+        if try mir_vframe_cleanup_scope_resident(d, store, indexes, function, scope) && mir_vframe_suspend_return(store, indexes, function, work.block) { skip = true }
+        if !skip { if !mir_v7_exit_has(exits, work.block) { exits = try __s0_buffer_append(MirV7Exit, d, exits, MirV7Exit(block: work.block, terminator: term_id)) } } }
     if t.kind == mir_term_jump() { let add = try mir_v7_add_config(d, seen, queue, t.target, status, active)
 seen = add.seen
 queue = add.queue }

@@ -87,6 +87,33 @@ fn mir_vdiag_entry_result() -> U64 { return 72 }
 fn mir_vdiag_entry_signature() -> U64 { return 73 }
 fn mir_vdiag_copy_source_type() -> U64 { return 74 }
 fn mir_vdiag_loop_view_read() -> U64 { return 75 }
+fn mir_vdiag_frame_step_signature() -> U64 { return 76 }
+fn mir_vdiag_frame_status_shape() -> U64 { return 77 }
+fn mir_vdiag_frame_state_shape() -> U64 { return 78 }
+fn mir_vdiag_frame_record_shape() -> U64 { return 79 }
+fn mir_vdiag_frame_ownership() -> U64 { return 80 }
+fn mir_vdiag_frame_reserved_name() -> U64 { return 81 }
+fn mir_vdiag_frame_field_kind() -> U64 { return 82 }
+fn mir_vdiag_frame_alloc_count() -> U64 { return 83 }
+fn mir_vdiag_frame_alloc_site() -> U64 { return 84 }
+fn mir_vdiag_frame_alloc_use() -> U64 { return 85 }
+fn mir_vdiag_frame_param_use() -> U64 { return 86 }
+fn mir_vdiag_frame_alias_out() -> U64 { return 87 }
+fn mir_vdiag_frame_escape() -> U64 { return 88 }
+fn mir_vdiag_frame_type_use() -> U64 { return 89 }
+fn mir_vdiag_frame_dispatch() -> U64 { return 90 }
+fn mir_vdiag_frame_suspend_dup() -> U64 { return 91 }
+fn mir_vdiag_frame_save_order() -> U64 { return 92 }
+fn mir_vdiag_frame_load_set() -> U64 { return 93 }
+fn mir_vdiag_frame_status_call() -> U64 { return 94 }
+fn mir_vdiag_frame_status_park() -> U64 { return 95 }
+fn mir_vdiag_frame_status_done() -> U64 { return 96 }
+fn mir_vdiag_frame_status_cancelled() -> U64 { return 97 }
+fn mir_vdiag_frame_cleanup_place() -> U64 { return 98 }
+fn mir_vdiag_frame_cleanup_disarm() -> U64 { return 99 }
+fn mir_vdiag_frame_step_call() -> U64 { return 100 }
+fn mir_vdiag_frame_uninit_load() -> U64 { return 101 }
+fn mir_vdiag_frame_scope_anchor() -> U64 { return 102 }
 // All IDs use the frozen external 1-based contract. Zero means no context.
 // detail fields are append-only small numeric expected/actual/reference facts.
 type MirVerifyDiagRec {

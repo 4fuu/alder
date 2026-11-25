@@ -1,0 +1,69 @@
+mir 6
+
+const @one: u64 = 1
+const @false: bool = false
+
+enum @__alder_step.status {
+  done
+  call
+  park
+  cancelled
+}
+
+enum @__alder_step.state.x.Evented {
+  entry
+  resume0
+}
+
+type @__alder_step.frame.x.Evented {
+  state: @__alder_step.state.x.Evented
+  p0: u64
+  out: u64
+}
+
+binding @runtime "alder.h" {
+  c_fn @task_cancelled = "alder_task_cancelled"() -> bool
+}
+
+fn @__alder_step.run.x.Evented(%d: domain_handle, %frame: safe_mut(@__alder_step.frame.x.Evented), %frame_owner: domain_handle) -> @__alder_step.status {
+bb0:
+  %state = load field(deref %frame, state)
+  switch %state {
+    entry -> bb_entry
+    resume0 -> bb_resume0
+  }
+
+bb_entry:
+  %cancelled = c.call.unsafe @runtime.task_cancelled()
+  branch %cancelled, bb_cancel0, bb_park
+
+bb_park:
+  %resume = enum.construct @__alder_step.state.x.Evented, resume0
+  store field(deref %frame, state), %resume
+  %park = enum.construct @__alder_step.status, park
+  return %park
+
+bb_resume0:
+  %cancelled0 = c.call.unsafe @runtime.task_cancelled()
+  branch %cancelled0, bb_cancel1, bb_after
+
+bb_after:
+  %p0 = load field(deref %frame, p0)
+  store field(deref %frame, out), %p0
+  %done = enum.construct @__alder_step.status, done
+  return %done
+
+bb_alt_suspend:
+  %alt_resume = enum.construct @__alder_step.state.x.Evented, resume0
+  store field(deref %frame, state), %alt_resume
+  %alt_park = enum.construct @__alder_step.status, park
+  return %alt_park
+
+bb_cancel0:
+  %st0 = enum.construct @__alder_step.status, cancelled
+  return %st0
+
+bb_cancel1:
+  %st1 = enum.construct @__alder_step.status, cancelled
+  return %st1
+}

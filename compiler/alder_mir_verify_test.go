@@ -1437,7 +1437,544 @@ fn run_cases(d: Domain, initial: MirStore) -> Result(Bool, __s0_Error) {
     // only accepts at version 4 or later, so this case verifies at the
     // current format version instead of the harness's usual 3.
     if !emit_verification(112, try mir_verify_module(d, try table_v8_fixture(d, try mir_store_new(d), 11), 5)) { return Ok(false) }
+
+    if !emit_verification(200, try mir_verify_module(d, try frame_fixture(d, try mir_store_new(d), 0), 6)) { return Ok(false) }
+    if !emit_verification(201, try mir_verify_module(d, try frame_fixture(d, try mir_store_new(d), 1), 6)) { return Ok(false) }
+    if !emit_verification(202, try mir_verify_module(d, try frame_fixture(d, try mir_store_new(d), 2), 6)) { return Ok(false) }
+    if !emit_verification(203, try mir_verify_module(d, try frame_fixture(d, try mir_store_new(d), 3), 6)) { return Ok(false) }
+    if !emit_verification(204, try mir_verify_module(d, try frame_fixture(d, try mir_store_new(d), 4), 6)) { return Ok(false) }
+    if !emit_verification(205, try mir_verify_module(d, try frame_fixture(d, try mir_store_new(d), 5), 6)) { return Ok(false) }
+    if !emit_verification(206, try mir_verify_module(d, try frame_fixture(d, try mir_store_new(d), 6), 6)) { return Ok(false) }
+    if !emit_verification(207, try mir_verify_module(d, try frame_fixture(d, try mir_store_new(d), 7), 6)) { return Ok(false) }
+    if !emit_verification(208, try mir_verify_module(d, try frame_fixture(d, try mir_store_new(d), 8), 6)) { return Ok(false) }
+    if !emit_verification(209, try mir_verify_module(d, try frame_fixture(d, try mir_store_new(d), 9), 6)) { return Ok(false) }
+    if !emit_verification(210, try mir_verify_module(d, try frame_fixture(d, try mir_store_new(d), 10), 6)) { return Ok(false) }
+    if !emit_verification(211, try mir_verify_module(d, try frame_fixture(d, try mir_store_new(d), 11), 6)) { return Ok(false) }
+    if !emit_verification(212, try mir_verify_module(d, try frame_fixture(d, try mir_store_new(d), 12), 6)) { return Ok(false) }
+    if !emit_verification(213, try mir_verify_module(d, try frame_fixture(d, try mir_store_new(d), 13), 6)) { return Ok(false) }
+    if !emit_verification(214, try mir_verify_module(d, try frame_cursor_fixture(d, try mir_store_new(d), 0), 6)) { return Ok(false) }
+    if !emit_verification(215, try mir_verify_module(d, try frame_cursor_fixture(d, try mir_store_new(d), 1), 6)) { return Ok(false) }
+    if !emit_verification(216, try mir_verify_module(d, try frame_cursor_fixture(d, try mir_store_new(d), 2), 6)) { return Ok(false) }
     return Ok(true)
+}
+
+
+// frame_fixture builds a minimal park-type step module for the frame
+// acceptance rules. Modes mutate one declaration or instruction so each rule
+// has a focused acceptance or rejection case.
+//   0 valid park step
+//   1 two-parameter step signature
+//   2 status enum without park
+//   3 state enum without resume0
+//   4 frame fields state/out/p0
+//   5 orphan frame and state
+//   6 local of safe_mut(frame)
+//   7 call return from the park point
+//   8 done without storing out
+//   9 cancelled after storing out
+//  10 dispatch block missing the state switch
+//  11 step frame passed as a call operand
+//  12 borrow of a frame field place
+//  13 duplicate resume0 suspend block
+fn frame_fixture(d: Domain, initial: MirStore, mode: U64) -> Result(MirStore, __s0_Error) {
+    let empty = try __s0_buffer_new(U64, d)
+    let handle = try mir_intern_type(d, initial, mir_type_kind_domain_handle(), 0, 0, 0, empty, 0)
+    var store = handle.store
+    let status = try mir_add_named_type(d, store, mir_type_kind_enum(), "__alder_step.status")
+    store = try mir_add_type_part(d, status.store, mir_type_part_variant(), status.type_id, 0, "done", mir_type_unit())
+    store = try mir_add_type_part(d, store, mir_type_part_variant(), status.type_id, 1, "call", mir_type_unit())
+    if mode != 2 { store = try mir_add_type_part(d, store, mir_type_part_variant(), status.type_id, 2, "park", mir_type_unit()) }
+    var next_status: U64 = 2
+    if mode != 2 { next_status = 3 }
+    store = try mir_add_type_part(d, store, mir_type_part_variant(), status.type_id, next_status, "cancelled", mir_type_unit())
+    let state = try mir_add_named_type(d, store, mir_type_kind_enum(), "__alder_step.state.x.Evented")
+    store = try mir_add_type_part(d, state.store, mir_type_part_variant(), state.type_id, 0, "entry", mir_type_unit())
+    if mode != 3 { store = try mir_add_type_part(d, store, mir_type_part_variant(), state.type_id, 1, "resume0", mir_type_unit()) }
+    if mode == 3 { store = try mir_add_type_part(d, store, mir_type_part_variant(), state.type_id, 1, "resume1", mir_type_unit()) }
+    let frame = try mir_add_named_type(d, store, mir_type_kind_aggregate(), "__alder_step.frame.x.Evented")
+    store = frame.store
+    if mode == 4 {
+        store = try mir_add_type_part(d, store, mir_type_part_field(), frame.type_id, 0, "state", state.type_id)
+        store = try mir_add_type_part(d, store, mir_type_part_field(), frame.type_id, 1, "out", mir_type_u64())
+        store = try mir_add_type_part(d, store, mir_type_part_field(), frame.type_id, 2, "p0", mir_type_u64())
+    } else {
+        store = try mir_add_type_part(d, store, mir_type_part_field(), frame.type_id, 0, "state", state.type_id)
+        store = try mir_add_type_part(d, store, mir_type_part_field(), frame.type_id, 1, "p0", mir_type_u64())
+        store = try mir_add_type_part(d, store, mir_type_part_field(), frame.type_id, 2, "out", mir_type_u64())
+    }
+    let frame_view = try mir_intern_type(d, store, mir_type_kind_safe_mut(), frame.type_id, 0, 0, empty, 0)
+    store = frame_view.store
+    if mode == 5 {
+        let orphan_state = try mir_add_named_type(d, store, mir_type_kind_enum(), "__alder_step.state.orphan.Evented")
+        store = try mir_add_type_part(d, orphan_state.store, mir_type_part_variant(), orphan_state.type_id, 0, "entry", mir_type_unit())
+        let orphan = try mir_add_named_type(d, store, mir_type_kind_aggregate(), "__alder_step.frame.orphan.Evented")
+        store = try mir_add_type_part(d, orphan.store, mir_type_part_field(), orphan.type_id, 0, "state", orphan_state.type_id)
+        store = try mir_add_type_part(d, store, mir_type_part_field(), orphan.type_id, 1, "p0", mir_type_u64())
+        store = try mir_add_type_part(d, store, mir_type_part_field(), orphan.type_id, 2, "out", mir_type_u64())
+    }
+    let false_const = try mir_add_const(d, store, "false", mir_type_bool(), mir_const_bool(), 0, 0, 0, "")
+    store = false_const.store
+    let false_rec = __s0_buffer_get(MirConstRec, store.constants, false_const.id - 1)
+    let runtime_binding = try mir_add_binding(d, store, "runtime", "alder.h")
+    store = runtime_binding.store
+    let cancel_binding = try mir_add_binding_fn(d, store, runtime_binding.id, "task_cancelled", "alder_task_cancelled", mir_type_bool())
+    store = cancel_binding.store
+    let cancel = try mir_add_function(d, store, "task_cancelled", mir_type_bool())
+    store = cancel.store
+    let cancel_entry = try mir_add_block(d, store, cancel.id, 0, "entry")
+    let cancel_value = try mir_add_value(d, cancel_entry.store, cancel.id, "f", mir_type_bool(), mir_value_def_instruction(), cancel_entry.id, 1)
+    let cancel_get = try mir_add_instruction(d, cancel_value.store, MirInstrRec(function: cancel.id, block: cancel_entry.id, ordinal: 0, op: mir_op_const_get(), result: cancel_value.id, place: 0, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: false_rec.name_start, name_end: false_rec.name_end))
+    store = (try mir_add_terminator(d, cancel_get.store, MirTermRec(function: cancel.id, block: cancel_entry.id, kind: mir_term_return(), value: cancel_value.id, target: 0, then_block: 0, else_block: 0))).store
+    let step = try mir_add_function(d, store, "__alder_step.run.x.Evented", status.type_id)
+    store = step.store
+    let pd = try mir_add_function_param(d, store, step.id, 0, "d", handle.type_id)
+    let pf = try mir_add_function_param(d, pd.store, step.id, 1, "frame", frame_view.type_id)
+    store = pf.store
+    var owner_value: U64 = 0
+    if mode != 1 { let po = try mir_add_function_param(d, store, step.id, 2, "frame_owner", handle.type_id)
+        store = po.store
+        owner_value = po.id }
+    if mode == 6 { store = (try mir_add_local(d, store, step.id, 0, "held", frame_view.type_id)).store }
+    let bb0 = try mir_add_block(d, store, step.id, 0, "bb0")
+    let bb_entry = try mir_add_block(d, bb0.store, step.id, 1, "bb_entry")
+    let bb_park = try mir_add_block(d, bb_entry.store, step.id, 2, "bb_park")
+    let bb_resume = try mir_add_block(d, bb_park.store, step.id, 3, "bb_resume0")
+    let bb_after = try mir_add_block(d, bb_resume.store, step.id, 4, "bb_after")
+    let bb_cancel0 = try mir_add_block(d, bb_after.store, step.id, 5, "bb_cancel0")
+    let bb_cancel1 = try mir_add_block(d, bb_cancel0.store, step.id, 6, "bb_cancel1")
+    store = bb_cancel1.store
+    let state_name = try mir_append_name(d, store, "state")
+    store = state_name.store
+    let frame_deref = try mir_add_place(d, store, MirPlaceRec(function: step.id, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: pf.id))
+    store = frame_deref.store
+    let state_place = try mir_add_place(d, store, MirPlaceRec(function: step.id, kind: mir_place_field(), local: 0, base: frame_deref.id, field_start: state_name.start, field_end: state_name.end, deref_value: 0))
+    store = state_place.store
+    let p0_place = try mir_add_place(d, store, MirPlaceRec(function: step.id, kind: mir_place_field(), local: 0, base: frame_deref.id, field_start: 0, field_end: 0, deref_value: 0))
+    store = p0_place.store
+    let out_place = try mir_add_place(d, store, MirPlaceRec(function: step.id, kind: mir_place_field(), local: 0, base: frame_deref.id, field_start: 0, field_end: 0, deref_value: 0))
+    store = out_place.store
+    // Resolve field name ranges by appending the canonical names once more:
+    // type-part names are compared by range, so the place records need the
+    // same bytes. mir_add_type_part appended them already; repeat the names
+    // and patch the place field ranges below.
+    let p0_name = try mir_append_name(d, store, "p0")
+    store = p0_name.store
+    let out_name = try mir_append_name(d, store, "out")
+    store = out_name.store
+    // The appended ranges are at the end of the name buffer; patch the two
+    // places and the state place field range via their existing records.
+    var places = store.places
+    let p0_rec = __s0_buffer_get(MirPlaceRec, places, p0_place.id - 1)
+    __s0_buffer_set(MirPlaceRec, places, p0_place.id - 1, MirPlaceRec(function: p0_rec.function, kind: p0_rec.kind, local: p0_rec.local, base: p0_rec.base, field_start: p0_name.start, field_end: p0_name.end, deref_value: 0))
+    let out_rec = __s0_buffer_get(MirPlaceRec, places, out_place.id - 1)
+    __s0_buffer_set(MirPlaceRec, places, out_place.id - 1, MirPlaceRec(function: out_rec.function, kind: out_rec.kind, local: out_rec.local, base: out_rec.base, field_start: out_name.start, field_end: out_name.end, deref_value: 0))
+    store = mir_with_places(store, places)
+    var state_load_id: U64 = 0
+    if mode != 10 { let state_load = try mir_add_value(d, store, step.id, "state_value", state.type_id, mir_value_def_instruction(), bb0.id, 1)
+        store = state_load.store
+        state_load_id = state_load.id }
+    var ord: U64 = 0
+    var resume_name = try mir_append_name(d, store, "resume0")
+    if mode == 3 { resume_name = try mir_append_name(d, store, "resume1") }
+    store = resume_name.store
+    if mode != 10 {
+        store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb0.id, ordinal: 0, op: mir_op_load(), result: state_load_id, place: state_place.id, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+        let dispatch = try mir_add_terminator(d, store, MirTermRec(function: step.id, block: bb0.id, kind: mir_term_switch(), value: state_load_id, target: 0, then_block: 0, else_block: 0))
+        store = dispatch.store
+        let entry_name = try mir_append_name(d, store, "entry")
+        store = entry_name.store
+        store = (try mir_add_operand(d, store, MirOperandRec(kind: mir_operand_switch_case(), owner: dispatch.id, ordinal: 0, edge: 0, value: 0, target: bb_entry.id, operand_type: 0, name_start: entry_name.start, name_end: entry_name.end))).store
+        if mode != 3 { store = (try mir_add_operand(d, store, MirOperandRec(kind: mir_operand_switch_case(), owner: dispatch.id, ordinal: 1, edge: 0, value: 0, target: bb_resume.id, operand_type: 0, name_start: resume_name.start, name_end: resume_name.end))).store }
+    } else {
+        store = (try mir_add_terminator(d, store, MirTermRec(function: step.id, block: bb0.id, kind: mir_term_jump(), value: 0, target: bb_entry.id, then_block: 0, else_block: 0))).store
+    }
+    // bb_entry: cancellation check then park.
+    let cancelled = try mir_add_value(d, store, step.id, "cancelled", mir_type_bool(), mir_value_def_instruction(), bb_entry.id, 1)
+    store = cancelled.store
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_entry.id, ordinal: 0, op: mir_op_c_binding_call(), result: cancelled.id, place: 0, type_op: 0, a: 0, b: 0, c: 0, target: cancel_binding.id, name_start: 0, name_end: 0))).store
+    store = (try mir_add_terminator(d, store, MirTermRec(function: step.id, block: bb_entry.id, kind: mir_term_branch(), value: cancelled.id, target: 0, then_block: bb_cancel0.id, else_block: bb_park.id))).store
+    // bb_park: save resume0 and return park (or call in mode 7).
+    let resume_state = try mir_add_value(d, store, step.id, "resume", state.type_id, mir_value_def_instruction(), bb_park.id, 1)
+    store = resume_state.store
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_park.id, ordinal: 0, op: mir_op_enum_construct(), result: resume_state.id, place: 0, type_op: state.type_id, a: 0, b: 0, c: 0, target: 0, name_start: resume_name.start, name_end: resume_name.end))).store
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_park.id, ordinal: 1, op: mir_op_store(), result: 0, place: state_place.id, type_op: 0, a: resume_state.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+    let park_status = try mir_add_value(d, store, step.id, "park_status", status.type_id, mir_value_def_instruction(), bb_park.id, 3)
+    store = park_status.store
+    let park_name = try mir_append_name(d, store, "park")
+    store = park_name.store
+    let call_name = try mir_append_name(d, store, "call")
+    store = call_name.store
+    var park_variant = park_name
+    if mode == 7 { park_variant = call_name }
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_park.id, ordinal: 2, op: mir_op_enum_construct(), result: park_status.id, place: 0, type_op: status.type_id, a: 0, b: 0, c: 0, target: 0, name_start: park_variant.start, name_end: park_variant.end))).store
+    store = (try mir_add_terminator(d, store, MirTermRec(function: step.id, block: bb_park.id, kind: mir_term_return(), value: park_status.id, target: 0, then_block: 0, else_block: 0))).store
+    // bb_resume0: cancellation check then done.
+    let cancelled0 = try mir_add_value(d, store, step.id, "cancelled0", mir_type_bool(), mir_value_def_instruction(), bb_resume.id, 1)
+    store = cancelled0.store
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_resume.id, ordinal: 0, op: mir_op_c_binding_call(), result: cancelled0.id, place: 0, type_op: 0, a: 0, b: 0, c: 0, target: cancel_binding.id, name_start: 0, name_end: 0))).store
+    store = (try mir_add_terminator(d, store, MirTermRec(function: step.id, block: bb_resume.id, kind: mir_term_branch(), value: cancelled0.id, target: 0, then_block: bb_cancel1.id, else_block: bb_after.id))).store
+    // bb_after: load p0 and store out.
+    let p0_value = try mir_add_value(d, store, step.id, "p0_value", mir_type_u64(), mir_value_def_instruction(), bb_after.id, 1)
+    store = p0_value.store
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_after.id, ordinal: 0, op: mir_op_load(), result: p0_value.id, place: p0_place.id, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+    var after_ord: U64 = 1
+    if mode != 8 { store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_after.id, ordinal: after_ord, op: mir_op_store(), result: 0, place: out_place.id, type_op: 0, a: p0_value.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+        after_ord = after_ord + 1 }
+    if mode == 11 { let call_value = try mir_add_value(d, store, step.id, "leak", mir_type_bool(), mir_value_def_instruction(), bb_after.id, after_ord + 1)
+        store = call_value.store
+        let bad_call = try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_after.id, ordinal: after_ord, op: mir_op_c_binding_call(), result: call_value.id, place: 0, type_op: 0, a: 0, b: 0, c: 0, target: cancel_binding.id, name_start: 0, name_end: 0))
+        store = bad_call.store
+        store = (try mir_add_operand(d, store, MirOperandRec(kind: mir_operand_instruction(), owner: bad_call.id, ordinal: 0, edge: 0, value: pf.id, target: 0, operand_type: 0, name_start: 0, name_end: 0))).store
+        after_ord = after_ord + 1 }
+    if mode == 12 { let view_type = try mir_intern_type(d, store, mir_type_kind_safe_mut(), mir_type_u64(), 0, 0, empty, 0)
+        store = view_type.store
+        let borrowed = try mir_add_value(d, store, step.id, "borrowed", view_type.type_id, mir_value_def_instruction(), bb_after.id, after_ord + 1)
+        store = borrowed.store
+        store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_after.id, ordinal: after_ord, op: mir_op_borrow_mut(), result: borrowed.id, place: p0_place.id, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+        after_ord = after_ord + 1 }
+    let done_status = try mir_add_value(d, store, step.id, "done_status", status.type_id, mir_value_def_instruction(), bb_after.id, after_ord + 1)
+    store = done_status.store
+    let done_name = try mir_append_name(d, store, "done")
+    store = done_name.store
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_after.id, ordinal: after_ord, op: mir_op_enum_construct(), result: done_status.id, place: 0, type_op: status.type_id, a: 0, b: 0, c: 0, target: 0, name_start: done_name.start, name_end: done_name.end))).store
+    store = (try mir_add_terminator(d, store, MirTermRec(function: step.id, block: bb_after.id, kind: mir_term_return(), value: done_status.id, target: 0, then_block: 0, else_block: 0))).store
+    // Cancellation blocks.
+    if mode == 9 { let cp0 = try mir_add_value(d, store, step.id, "cp0", mir_type_u64(), mir_value_def_instruction(), bb_cancel0.id, 1)
+        store = cp0.store
+        store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_cancel0.id, ordinal: 0, op: mir_op_load(), result: cp0.id, place: p0_place.id, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+        store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_cancel0.id, ordinal: 1, op: mir_op_store(), result: 0, place: out_place.id, type_op: 0, a: cp0.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store }
+    var cancel0_ordinal: U64 = 0
+    if mode == 9 { cancel0_ordinal = 2 }
+    let st0 = try mir_add_value(d, store, step.id, "st0", status.type_id, mir_value_def_instruction(), bb_cancel0.id, cancel0_ordinal + 1)
+    store = st0.store
+    let cancel_name = try mir_append_name(d, store, "cancelled")
+    store = cancel_name.store
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_cancel0.id, ordinal: cancel0_ordinal, op: mir_op_enum_construct(), result: st0.id, place: 0, type_op: status.type_id, a: 0, b: 0, c: 0, target: 0, name_start: cancel_name.start, name_end: cancel_name.end))).store
+    store = (try mir_add_terminator(d, store, MirTermRec(function: step.id, block: bb_cancel0.id, kind: mir_term_return(), value: st0.id, target: 0, then_block: 0, else_block: 0))).store
+    let st1 = try mir_add_value(d, store, step.id, "st1", status.type_id, mir_value_def_instruction(), bb_cancel1.id, 1)
+    store = st1.store
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_cancel1.id, ordinal: 0, op: mir_op_enum_construct(), result: st1.id, place: 0, type_op: status.type_id, a: 0, b: 0, c: 0, target: 0, name_start: cancel_name.start, name_end: cancel_name.end))).store
+    store = (try mir_add_terminator(d, store, MirTermRec(function: step.id, block: bb_cancel1.id, kind: mir_term_return(), value: st1.id, target: 0, then_block: 0, else_block: 0))).store
+    if mode == 13 { let alt = try mir_add_block(d, store, step.id, 7, "bb_alt_suspend")
+        store = alt.store
+        let alt_resume = try mir_add_value(d, store, step.id, "alt_resume", state.type_id, mir_value_def_instruction(), alt.id, 1)
+        store = alt_resume.store
+        store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: alt.id, ordinal: 0, op: mir_op_enum_construct(), result: alt_resume.id, place: 0, type_op: state.type_id, a: 0, b: 0, c: 0, target: 0, name_start: resume_name.start, name_end: resume_name.end))).store
+        store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: alt.id, ordinal: 1, op: mir_op_store(), result: 0, place: state_place.id, type_op: 0, a: alt_resume.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+        let alt_park = try mir_add_value(d, store, step.id, "alt_park", status.type_id, mir_value_def_instruction(), alt.id, 3)
+        store = alt_park.store
+        store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: alt.id, ordinal: 2, op: mir_op_enum_construct(), result: alt_park.id, place: 0, type_op: status.type_id, a: 0, b: 0, c: 0, target: 0, name_start: park_name.start, name_end: park_name.end))).store
+        store = (try mir_add_terminator(d, store, MirTermRec(function: step.id, block: alt.id, kind: mir_term_return(), value: alt_park.id, target: 0, then_block: 0, else_block: 0))).store }
+    return Ok(store)
+}
+
+
+
+// frame_cursor_fixture builds a suspending cleanup cursor whose frame-resident
+// scope is anchored in s0. Mode 0 parks, mode 1 hands off a call with x0/y0,
+// and mode 2 re-enters the scope through unsaved s1.
+fn frame_cursor_fixture(d: Domain, initial: MirStore, mode: U64) -> Result(MirStore, __s0_Error) {
+    let empty = try __s0_buffer_new(U64, d)
+    let handle = try mir_intern_type(d, initial, mir_type_kind_domain_handle(), 0, 0, 0, empty, 0)
+    var store = handle.store
+    let cleanup_id_type = try mir_intern_type(d, store, mir_type_kind_cleanup_id(), 0, 0, 0, empty, 0)
+    store = cleanup_id_type.store
+    let cleanup_scope_type = try mir_intern_type(d, store, mir_type_kind_cleanup_scope(), 0, 0, 0, empty, 0)
+    store = cleanup_scope_type.store
+    let status = try mir_add_named_type(d, store, mir_type_kind_enum(), "__alder_step.status")
+    store = try mir_add_type_part(d, status.store, mir_type_part_variant(), status.type_id, 0, "done", mir_type_unit())
+    store = try mir_add_type_part(d, store, mir_type_part_variant(), status.type_id, 1, "call", mir_type_unit())
+    store = try mir_add_type_part(d, store, mir_type_part_variant(), status.type_id, 2, "park", mir_type_unit())
+    store = try mir_add_type_part(d, store, mir_type_part_variant(), status.type_id, 3, "cancelled", mir_type_unit())
+    let state = try mir_add_named_type(d, store, mir_type_kind_enum(), "__alder_step.state.cursor.Evented")
+    store = try mir_add_type_part(d, state.store, mir_type_part_variant(), state.type_id, 0, "entry", mir_type_unit())
+    store = try mir_add_type_part(d, store, mir_type_part_variant(), state.type_id, 1, "cleanup0", mir_type_unit())
+    let leaf_state = try mir_add_named_type(d, store, mir_type_kind_enum(), "__alder_step.state.leaf.Evented")
+    store = try mir_add_type_part(d, leaf_state.store, mir_type_part_variant(), leaf_state.type_id, 0, "entry", mir_type_unit())
+    let leaf_frame = try mir_add_named_type(d, store, mir_type_kind_aggregate(), "__alder_step.frame.leaf.Evented")
+    store = try mir_add_type_part(d, leaf_frame.store, mir_type_part_field(), leaf_frame.type_id, 0, "state", leaf_state.type_id)
+    store = try mir_add_type_part(d, store, mir_type_part_field(), leaf_frame.type_id, 1, "p0", mir_type_u64())
+    store = try mir_add_type_part(d, store, mir_type_part_field(), leaf_frame.type_id, 2, "out", mir_type_u64())
+    let leaf_view = try mir_intern_type(d, store, mir_type_kind_safe_mut(), leaf_frame.type_id, 0, 0, empty, 0)
+    store = leaf_view.store
+    let frame = try mir_add_named_type(d, store, mir_type_kind_aggregate(), "__alder_step.frame.cursor.Evented")
+    store = frame.store
+    store = try mir_add_type_part(d, store, mir_type_part_field(), frame.type_id, 0, "state", state.type_id)
+    store = try mir_add_type_part(d, store, mir_type_part_field(), frame.type_id, 1, "p0", mir_type_u64())
+    var ordinal: U64 = 2
+    if mode == 1 {
+        store = try mir_add_type_part(d, store, mir_type_part_field(), frame.type_id, ordinal, "x0", leaf_view.type_id)
+        store = try mir_add_type_part(d, store, mir_type_part_field(), frame.type_id, ordinal + 1, "y0", handle.type_id)
+        ordinal = ordinal + 2
+    }
+    store = try mir_add_type_part(d, store, mir_type_part_field(), frame.type_id, ordinal, "c0", cleanup_id_type.type_id)
+    store = try mir_add_type_part(d, store, mir_type_part_field(), frame.type_id, ordinal + 1, "s0", cleanup_scope_type.type_id)
+    ordinal = ordinal + 2
+    if mode == 2 {
+        store = try mir_add_type_part(d, store, mir_type_part_field(), frame.type_id, ordinal, "s1", cleanup_scope_type.type_id)
+        ordinal = ordinal + 1
+    }
+    store = try mir_add_type_part(d, store, mir_type_part_field(), frame.type_id, ordinal, "out", mir_type_u64())
+    let frame_view = try mir_intern_type(d, store, mir_type_kind_safe_mut(), frame.type_id, 0, 0, empty, 0)
+    store = frame_view.store
+    let runtime_binding = try mir_add_binding(d, store, "runtime", "alder.h")
+    store = runtime_binding.store
+    let cancel_binding = try mir_add_binding_fn(d, store, runtime_binding.id, "task_cancelled", "alder_task_cancelled", mir_type_bool())
+    store = cancel_binding.store
+    let one_const = try mir_add_const(d, store, "one", mir_type_u64(), mir_const_int(), 0, 1, 0, "")
+    store = one_const.store
+    let one_rec = __s0_buffer_get(MirConstRec, store.constants, one_const.id - 1)
+    let leaf_step = try mir_add_function(d, store, "__alder_step.run.leaf.Evented", status.type_id)
+    store = leaf_step.store
+    let lpd = try mir_add_function_param(d, store, leaf_step.id, 0, "d", handle.type_id)
+    let lpf = try mir_add_function_param(d, lpd.store, leaf_step.id, 1, "frame", leaf_view.type_id)
+    let lpo = try mir_add_function_param(d, lpf.store, leaf_step.id, 2, "frame_owner", handle.type_id)
+    store = lpo.store
+    let lbb0 = try mir_add_block(d, store, leaf_step.id, 0, "bb0")
+    let lbb_entry = try mir_add_block(d, lbb0.store, leaf_step.id, 1, "bb_entry")
+    let lbb_done = try mir_add_block(d, lbb_entry.store, leaf_step.id, 2, "bb_done")
+    let lbb_cancel = try mir_add_block(d, lbb_done.store, leaf_step.id, 3, "bb_cancel")
+    store = lbb_cancel.store
+    let leaf_state_name = try mir_append_name(d, store, "state")
+    store = leaf_state_name.store
+    let leaf_p0_name = try mir_append_name(d, store, "p0")
+    store = leaf_p0_name.store
+    let leaf_out_name = try mir_append_name(d, store, "out")
+    store = leaf_out_name.store
+    let leaf_entry_name = try mir_append_name(d, store, "entry")
+    store = leaf_entry_name.store
+    let leaf_deref = try mir_add_place(d, store, MirPlaceRec(function: leaf_step.id, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: lpf.id))
+    store = leaf_deref.store
+    let leaf_state_place = try mir_add_place(d, store, MirPlaceRec(function: leaf_step.id, kind: mir_place_field(), local: 0, base: leaf_deref.id, field_start: leaf_state_name.start, field_end: leaf_state_name.end, deref_value: 0))
+    store = leaf_state_place.store
+    let leaf_p0_place = try mir_add_place(d, store, MirPlaceRec(function: leaf_step.id, kind: mir_place_field(), local: 0, base: leaf_deref.id, field_start: leaf_p0_name.start, field_end: leaf_p0_name.end, deref_value: 0))
+    store = leaf_p0_place.store
+    let leaf_out_place = try mir_add_place(d, store, MirPlaceRec(function: leaf_step.id, kind: mir_place_field(), local: 0, base: leaf_deref.id, field_start: leaf_out_name.start, field_end: leaf_out_name.end, deref_value: 0))
+    store = leaf_out_place.store
+    let leaf_state_value = try mir_add_value(d, store, leaf_step.id, "state_value", leaf_state.type_id, mir_value_def_instruction(), lbb0.id, 1)
+    store = leaf_state_value.store
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: leaf_step.id, block: lbb0.id, ordinal: 0, op: mir_op_load(), result: leaf_state_value.id, place: leaf_state_place.id, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+    let leaf_dispatch = try mir_add_terminator(d, store, MirTermRec(function: leaf_step.id, block: lbb0.id, kind: mir_term_switch(), value: leaf_state_value.id, target: 0, then_block: 0, else_block: 0))
+    store = leaf_dispatch.store
+    store = (try mir_add_operand(d, store, MirOperandRec(kind: mir_operand_switch_case(), owner: leaf_dispatch.id, ordinal: 0, edge: 0, value: 0, target: lbb_entry.id, operand_type: 0, name_start: leaf_entry_name.start, name_end: leaf_entry_name.end))).store
+    let leaf_cancelled = try mir_add_value(d, store, leaf_step.id, "cancelled", mir_type_bool(), mir_value_def_instruction(), lbb_entry.id, 1)
+    store = leaf_cancelled.store
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: leaf_step.id, block: lbb_entry.id, ordinal: 0, op: mir_op_c_binding_call(), result: leaf_cancelled.id, place: 0, type_op: 0, a: 0, b: 0, c: 0, target: cancel_binding.id, name_start: 0, name_end: 0))).store
+    store = (try mir_add_terminator(d, store, MirTermRec(function: leaf_step.id, block: lbb_entry.id, kind: mir_term_branch(), value: leaf_cancelled.id, target: 0, then_block: lbb_cancel.id, else_block: lbb_done.id))).store
+    let leaf_p0 = try mir_add_value(d, store, leaf_step.id, "p0_value", mir_type_u64(), mir_value_def_instruction(), lbb_done.id, 1)
+    store = leaf_p0.store
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: leaf_step.id, block: lbb_done.id, ordinal: 0, op: mir_op_load(), result: leaf_p0.id, place: leaf_p0_place.id, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: leaf_step.id, block: lbb_done.id, ordinal: 1, op: mir_op_store(), result: 0, place: leaf_out_place.id, type_op: 0, a: leaf_p0.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+    let leaf_done = try mir_add_value(d, store, leaf_step.id, "done", status.type_id, mir_value_def_instruction(), lbb_done.id, 3)
+    store = leaf_done.store
+    let leaf_done_name = try mir_append_name(d, store, "done")
+    store = leaf_done_name.store
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: leaf_step.id, block: lbb_done.id, ordinal: 2, op: mir_op_enum_construct(), result: leaf_done.id, place: 0, type_op: status.type_id, a: 0, b: 0, c: 0, target: 0, name_start: leaf_done_name.start, name_end: leaf_done_name.end))).store
+    store = (try mir_add_terminator(d, store, MirTermRec(function: leaf_step.id, block: lbb_done.id, kind: mir_term_return(), value: leaf_done.id, target: 0, then_block: 0, else_block: 0))).store
+    let leaf_cancel_name = try mir_append_name(d, store, "cancelled")
+    store = leaf_cancel_name.store
+    let leaf_st = try mir_add_value(d, store, leaf_step.id, "st", status.type_id, mir_value_def_instruction(), lbb_cancel.id, 1)
+    store = leaf_st.store
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: leaf_step.id, block: lbb_cancel.id, ordinal: 0, op: mir_op_enum_construct(), result: leaf_st.id, place: 0, type_op: status.type_id, a: 0, b: 0, c: 0, target: 0, name_start: leaf_cancel_name.start, name_end: leaf_cancel_name.end))).store
+    store = (try mir_add_terminator(d, store, MirTermRec(function: leaf_step.id, block: lbb_cancel.id, kind: mir_term_return(), value: leaf_st.id, target: 0, then_block: 0, else_block: 0))).store
+    let hook = try mir_add_function(d, store, "hook", mir_type_unit())
+    store = hook.store
+    let hook_param = try mir_add_function_param(d, store, hook.id, 0, "owner", mir_type_u64())
+    store = hook_param.store
+    let hook_block = try mir_add_block(d, store, hook.id, 0, "bb0")
+    store = (try mir_add_terminator(d, hook_block.store, MirTermRec(function: hook.id, block: hook_block.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))).store
+    let step = try mir_add_function(d, store, "__alder_step.run.cursor.Evented", status.type_id)
+    store = step.store
+    let pd = try mir_add_function_param(d, store, step.id, 0, "d", handle.type_id)
+    let pf = try mir_add_function_param(d, pd.store, step.id, 1, "frame", frame_view.type_id)
+    let po = try mir_add_function_param(d, pf.store, step.id, 2, "frame_owner", handle.type_id)
+    store = po.store
+    let bb0 = try mir_add_block(d, store, step.id, 0, "bb0")
+    let bb_entry = try mir_add_block(d, bb0.store, step.id, 1, "bb_entry")
+    let bb_setup = try mir_add_block(d, bb_entry.store, step.id, 2, "bb_setup")
+    let bb_resume = try mir_add_block(d, bb_setup.store, step.id, 3, "bb_resume")
+    let bb_after = try mir_add_block(d, bb_resume.store, step.id, 4, "bb_after")
+    let bb_cancel0 = try mir_add_block(d, bb_after.store, step.id, 5, "bb_cancel0")
+    let bb_cancel1 = try mir_add_block(d, bb_cancel0.store, step.id, 6, "bb_cancel1")
+    store = bb_cancel1.store
+    let state_name = try mir_append_name(d, store, "state")
+    store = state_name.store
+    let p0_name = try mir_append_name(d, store, "p0")
+    store = p0_name.store
+    let x0_name = try mir_append_name(d, store, "x0")
+    store = x0_name.store
+    let y0_name = try mir_append_name(d, store, "y0")
+    store = y0_name.store
+    let c0_name = try mir_append_name(d, store, "c0")
+    store = c0_name.store
+    let s0_name = try mir_append_name(d, store, "s0")
+    store = s0_name.store
+    let s1_name = try mir_append_name(d, store, "s1")
+    store = s1_name.store
+    let out_name = try mir_append_name(d, store, "out")
+    store = out_name.store
+    let frame_deref = try mir_add_place(d, store, MirPlaceRec(function: step.id, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: pf.id))
+    store = frame_deref.store
+    let state_place = try mir_add_place(d, store, MirPlaceRec(function: step.id, kind: mir_place_field(), local: 0, base: frame_deref.id, field_start: state_name.start, field_end: state_name.end, deref_value: 0))
+    store = state_place.store
+    let p0_place = try mir_add_place(d, store, MirPlaceRec(function: step.id, kind: mir_place_field(), local: 0, base: frame_deref.id, field_start: p0_name.start, field_end: p0_name.end, deref_value: 0))
+    store = p0_place.store
+    let x0_place = try mir_add_place(d, store, MirPlaceRec(function: step.id, kind: mir_place_field(), local: 0, base: frame_deref.id, field_start: x0_name.start, field_end: x0_name.end, deref_value: 0))
+    store = x0_place.store
+    let y0_place = try mir_add_place(d, store, MirPlaceRec(function: step.id, kind: mir_place_field(), local: 0, base: frame_deref.id, field_start: y0_name.start, field_end: y0_name.end, deref_value: 0))
+    store = y0_place.store
+    let c0_place = try mir_add_place(d, store, MirPlaceRec(function: step.id, kind: mir_place_field(), local: 0, base: frame_deref.id, field_start: c0_name.start, field_end: c0_name.end, deref_value: 0))
+    store = c0_place.store
+    let s0_place = try mir_add_place(d, store, MirPlaceRec(function: step.id, kind: mir_place_field(), local: 0, base: frame_deref.id, field_start: s0_name.start, field_end: s0_name.end, deref_value: 0))
+    store = s0_place.store
+    let s1_place = try mir_add_place(d, store, MirPlaceRec(function: step.id, kind: mir_place_field(), local: 0, base: frame_deref.id, field_start: s1_name.start, field_end: s1_name.end, deref_value: 0))
+    store = s1_place.store
+    let out_place = try mir_add_place(d, store, MirPlaceRec(function: step.id, kind: mir_place_field(), local: 0, base: frame_deref.id, field_start: out_name.start, field_end: out_name.end, deref_value: 0))
+    store = out_place.store
+    let entry_name = try mir_append_name(d, store, "entry")
+    store = entry_name.store
+    let cleanup_name = try mir_append_name(d, store, "cleanup0")
+    store = cleanup_name.store
+    let state_value = try mir_add_value(d, store, step.id, "state_value", state.type_id, mir_value_def_instruction(), bb0.id, 1)
+    store = state_value.store
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb0.id, ordinal: 0, op: mir_op_load(), result: state_value.id, place: state_place.id, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+    let dispatch = try mir_add_terminator(d, store, MirTermRec(function: step.id, block: bb0.id, kind: mir_term_switch(), value: state_value.id, target: 0, then_block: 0, else_block: 0))
+    store = dispatch.store
+    store = (try mir_add_operand(d, store, MirOperandRec(kind: mir_operand_switch_case(), owner: dispatch.id, ordinal: 0, edge: 0, value: 0, target: bb_entry.id, operand_type: 0, name_start: entry_name.start, name_end: entry_name.end))).store
+    store = (try mir_add_operand(d, store, MirOperandRec(kind: mir_operand_switch_case(), owner: dispatch.id, ordinal: 1, edge: 0, value: 0, target: bb_resume.id, operand_type: 0, name_start: cleanup_name.start, name_end: cleanup_name.end))).store
+    // Entry cancellation check.
+    let cancelled = try mir_add_value(d, store, step.id, "cancelled", mir_type_bool(), mir_value_def_instruction(), bb_entry.id, 1)
+    store = cancelled.store
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_entry.id, ordinal: 0, op: mir_op_c_binding_call(), result: cancelled.id, place: 0, type_op: 0, a: 0, b: 0, c: 0, target: cancel_binding.id, name_start: 0, name_end: 0))).store
+    store = (try mir_add_terminator(d, store, MirTermRec(function: step.id, block: bb_entry.id, kind: mir_term_branch(), value: cancelled.id, target: 0, then_block: bb_cancel0.id, else_block: bb_setup.id))).store
+    // Setup: save state, optional callee pair, anchor the scope, register, suspend.
+    let p0 = try mir_add_value(d, store, step.id, "p0_value", mir_type_u64(), mir_value_def_instruction(), bb_setup.id, 1)
+    store = p0.store
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_setup.id, ordinal: 0, op: mir_op_load(), result: p0.id, place: p0_place.id, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+    var setup_ord: U64 = 1
+    var child_value: U64 = 0
+    var child_domain_value: U64 = 0
+    if mode == 1 {
+        let one = try mir_add_value(d, store, step.id, "one", mir_type_u64(), mir_value_def_instruction(), bb_setup.id, setup_ord + 1)
+        store = one.store
+        store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_setup.id, ordinal: setup_ord, op: mir_op_const_get(), result: one.id, place: 0, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: one_rec.name_start, name_end: one_rec.name_end))).store
+        setup_ord = setup_ord + 1
+        let child_domain = try mir_add_value(d, store, step.id, "child_domain", handle.type_id, mir_value_def_instruction(), bb_setup.id, setup_ord + 1)
+        store = child_domain.store
+        store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_setup.id, ordinal: setup_ord, op: mir_op_domain_create(), result: child_domain.id, place: 0, type_op: 0, a: po.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+        setup_ord = setup_ord + 1
+        let child = try mir_add_value(d, store, step.id, "child", leaf_view.type_id, mir_value_def_instruction(), bb_setup.id, setup_ord + 1)
+        store = child.store
+        store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_setup.id, ordinal: setup_ord, op: mir_op_alloc(), result: child.id, place: 0, type_op: leaf_frame.type_id, a: child_domain.id, b: one.id, c: 0, target: 0, name_start: 0, name_end: 0))).store
+        setup_ord = setup_ord + 1
+        child_value = child.id
+        child_domain_value = child_domain.id
+    }
+    let cleanup_state = try mir_add_value(d, store, step.id, "cleanup_state", state.type_id, mir_value_def_instruction(), bb_setup.id, setup_ord + 1)
+    store = cleanup_state.store
+    let cleanup_variant = try mir_append_name(d, store, "cleanup0")
+    store = cleanup_variant.store
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_setup.id, ordinal: setup_ord, op: mir_op_enum_construct(), result: cleanup_state.id, place: 0, type_op: state.type_id, a: 0, b: 0, c: 0, target: 0, name_start: cleanup_variant.start, name_end: cleanup_variant.end))).store
+    setup_ord = setup_ord + 1
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_setup.id, ordinal: setup_ord, op: mir_op_store(), result: 0, place: state_place.id, type_op: 0, a: cleanup_state.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+    setup_ord = setup_ord + 1
+    if mode == 1 {
+        store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_setup.id, ordinal: setup_ord, op: mir_op_store(), result: 0, place: x0_place.id, type_op: 0, a: child_value, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+        setup_ord = setup_ord + 1
+        store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_setup.id, ordinal: setup_ord, op: mir_op_store(), result: 0, place: y0_place.id, type_op: 0, a: child_domain_value, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+        setup_ord = setup_ord + 1
+    }
+    let scope = try mir_add_value(d, store, step.id, "scope", cleanup_scope_type.type_id, mir_value_def_instruction(), bb_setup.id, setup_ord + 1)
+    store = scope.store
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_setup.id, ordinal: setup_ord, op: mir_op_cleanup_scope_begin(), result: scope.id, place: 0, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+    setup_ord = setup_ord + 1
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_setup.id, ordinal: setup_ord, op: mir_op_store(), result: 0, place: s0_place.id, type_op: 0, a: scope.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+    setup_ord = setup_ord + 1
+    let cleanup_id = try mir_add_value(d, store, step.id, "cleanup_id", cleanup_id_type.type_id, mir_value_def_instruction(), bb_setup.id, setup_ord + 1)
+    store = cleanup_id.store
+    let push = try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_setup.id, ordinal: setup_ord, op: mir_op_cleanup_push(), result: cleanup_id.id, place: p0_place.id, type_op: 0, a: scope.id, b: 0, c: 0, target: hook.id, name_start: 0, name_end: 0))
+    store = push.store
+    store = (try mir_add_operand(d, store, MirOperandRec(kind: mir_operand_instruction(), owner: push.id, ordinal: 0, edge: 0, value: p0.id, target: 0, operand_type: 0, name_start: 0, name_end: 0))).store
+    setup_ord = setup_ord + 1
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_setup.id, ordinal: setup_ord, op: mir_op_store(), result: 0, place: c0_place.id, type_op: 0, a: cleanup_id.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+    setup_ord = setup_ord + 1
+    let suspend = try mir_add_value(d, store, step.id, "suspend", status.type_id, mir_value_def_instruction(), bb_setup.id, setup_ord + 1)
+    store = suspend.store
+    var suspend_name = try mir_append_name(d, store, "park")
+    store = suspend_name.store
+    if mode == 1 { suspend_name = try mir_append_name(d, store, "call")
+        store = suspend_name.store }
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_setup.id, ordinal: setup_ord, op: mir_op_enum_construct(), result: suspend.id, place: 0, type_op: status.type_id, a: 0, b: 0, c: 0, target: 0, name_start: suspend_name.start, name_end: suspend_name.end))).store
+    store = (try mir_add_terminator(d, store, MirTermRec(function: step.id, block: bb_setup.id, kind: mir_term_return(), value: suspend.id, target: 0, then_block: 0, else_block: 0))).store
+    // Resume: cancellation check then reload the saved cursor state.
+    let cancelled0 = try mir_add_value(d, store, step.id, "cancelled0", mir_type_bool(), mir_value_def_instruction(), bb_resume.id, 1)
+    store = cancelled0.store
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_resume.id, ordinal: 0, op: mir_op_c_binding_call(), result: cancelled0.id, place: 0, type_op: 0, a: 0, b: 0, c: 0, target: cancel_binding.id, name_start: 0, name_end: 0))).store
+    store = (try mir_add_terminator(d, store, MirTermRec(function: step.id, block: bb_resume.id, kind: mir_term_branch(), value: cancelled0.id, target: 0, then_block: bb_cancel1.id, else_block: bb_after.id))).store
+    var after_ord: U64 = 0
+    var x0_value: U64 = 0
+    var y0_value: U64 = 0
+    if mode == 1 {
+        let xv = try mir_add_value(d, store, step.id, "x0_value", leaf_view.type_id, mir_value_def_instruction(), bb_after.id, 1)
+        store = xv.store
+        store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_after.id, ordinal: 0, op: mir_op_load(), result: xv.id, place: x0_place.id, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+        after_ord = 1
+        let yv = try mir_add_value(d, store, step.id, "y0_value", handle.type_id, mir_value_def_instruction(), bb_after.id, 2)
+        store = yv.store
+        store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_after.id, ordinal: 1, op: mir_op_load(), result: yv.id, place: y0_place.id, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+        after_ord = 2
+        x0_value = xv.id
+        y0_value = yv.id
+    }
+    let c0_value = try mir_add_value(d, store, step.id, "c0_value", cleanup_id_type.type_id, mir_value_def_instruction(), bb_after.id, after_ord + 1)
+    store = c0_value.store
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_after.id, ordinal: after_ord, op: mir_op_load(), result: c0_value.id, place: c0_place.id, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+    after_ord = after_ord + 1
+    let s0_value = try mir_add_value(d, store, step.id, "s0_value", cleanup_scope_type.type_id, mir_value_def_instruction(), bb_after.id, after_ord + 1)
+    store = s0_value.store
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_after.id, ordinal: after_ord, op: mir_op_load(), result: s0_value.id, place: s0_place.id, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+    after_ord = after_ord + 1
+    let resume_scope = try mir_add_value(d, store, step.id, "resume_scope", cleanup_scope_type.type_id, mir_value_def_instruction(), bb_after.id, after_ord + 1)
+    store = resume_scope.store
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_after.id, ordinal: after_ord, op: mir_op_cleanup_scope_begin(), result: resume_scope.id, place: 0, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+    after_ord = after_ord + 1
+    var anchor_place = s0_place.id
+    if mode == 2 { anchor_place = s1_place.id }
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_after.id, ordinal: after_ord, op: mir_op_store(), result: 0, place: anchor_place, type_op: 0, a: resume_scope.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+    after_ord = after_ord + 1
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_after.id, ordinal: after_ord, op: mir_op_cleanup_disarm(), result: 0, place: 0, type_op: 0, a: c0_value.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+    after_ord = after_ord + 1
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_after.id, ordinal: after_ord, op: mir_op_cleanup_scope_run(), result: 0, place: 0, type_op: 0, a: resume_scope.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+    after_ord = after_ord + 1
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_after.id, ordinal: after_ord, op: mir_op_cleanup_scope_end(), result: 0, place: 0, type_op: 0, a: resume_scope.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+    after_ord = after_ord + 1
+    if mode == 1 {
+        store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_after.id, ordinal: after_ord, op: mir_op_domain_destroy(), result: 0, place: 0, type_op: 0, a: y0_value, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+        after_ord = after_ord + 1
+    }
+    let p0_after = try mir_add_value(d, store, step.id, "p0_after", mir_type_u64(), mir_value_def_instruction(), bb_after.id, after_ord + 1)
+    store = p0_after.store
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_after.id, ordinal: after_ord, op: mir_op_load(), result: p0_after.id, place: p0_place.id, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+    after_ord = after_ord + 1
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_after.id, ordinal: after_ord, op: mir_op_store(), result: 0, place: out_place.id, type_op: 0, a: p0_after.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+    after_ord = after_ord + 1
+    let done = try mir_add_value(d, store, step.id, "done", status.type_id, mir_value_def_instruction(), bb_after.id, after_ord + 1)
+    store = done.store
+    let done_name = try mir_append_name(d, store, "done")
+    store = done_name.store
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_after.id, ordinal: after_ord, op: mir_op_enum_construct(), result: done.id, place: 0, type_op: status.type_id, a: 0, b: 0, c: 0, target: 0, name_start: done_name.start, name_end: done_name.end))).store
+    store = (try mir_add_terminator(d, store, MirTermRec(function: step.id, block: bb_after.id, kind: mir_term_return(), value: done.id, target: 0, then_block: 0, else_block: 0))).store
+    let cancel_name = try mir_append_name(d, store, "cancelled")
+    store = cancel_name.store
+    let st0 = try mir_add_value(d, store, step.id, "st0", status.type_id, mir_value_def_instruction(), bb_cancel0.id, 1)
+    store = st0.store
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_cancel0.id, ordinal: 0, op: mir_op_enum_construct(), result: st0.id, place: 0, type_op: status.type_id, a: 0, b: 0, c: 0, target: 0, name_start: cancel_name.start, name_end: cancel_name.end))).store
+    store = (try mir_add_terminator(d, store, MirTermRec(function: step.id, block: bb_cancel0.id, kind: mir_term_return(), value: st0.id, target: 0, then_block: 0, else_block: 0))).store
+    let st1 = try mir_add_value(d, store, step.id, "st1", status.type_id, mir_value_def_instruction(), bb_cancel1.id, 1)
+    store = st1.store
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_cancel1.id, ordinal: 0, op: mir_op_enum_construct(), result: st1.id, place: 0, type_op: status.type_id, a: 0, b: 0, c: 0, target: 0, name_start: cancel_name.start, name_end: cancel_name.end))).store
+    store = (try mir_add_terminator(d, store, MirTermRec(function: step.id, block: bb_cancel1.id, kind: mir_term_return(), value: st1.id, target: 0, then_block: 0, else_block: 0))).store
+    return Ok(store)
 }
 
 fn written_status(written: Bool) -> I32 {
@@ -1465,6 +2002,8 @@ func runMIRVerifierConformance(t *testing.T, exe string) {
 	want += "V 89 2\nD 8 64 1 1 4 0 0 0 0 0 0 5\nD 8 64 1 1 5 0 0 0 0 0 0 5\nC 90 0 1 1 2\n"
 	want += "E 91 1 5\nC 92 1 0 0 0\nD 1 5 1 0 0 0 0 0 2 0 0 1\nC 97 1 0 0 0\nD 10 74 1 1 1 0 0 13 0 0 10 13\nC 98 1 0 0 0\nD 10 74 1 1 1 0 0 18 0 0 10 18\nC 93 0 1 0 0\nC 100 0 1 0 0\nC 101 1 0 0 0\nD 5 41 2 1 1 0 0 15 0 0 15 2\nC 102 1 0 0 0\nD 5 41 2 1 2 0 0 10 0 0 10 3\nC 103 1 0 0 0\nD 5 41 2 1 5 0 0 2 0 0 2 6\nC 104 1 0 0 0\nD 5 41 2 1 5 0 0 2 0 0 2 6\nC 105 0 1 0 0\nC 106 1 0 0 0\nD 5 41 2 1 1 0 0 14 0 0 14 2\nC 107 1 0 0 0\nD 1 11 2 1 1 0 0 0 1 2147483647 0 0\nC 108 1 0 0 0\nD 1 11 2 1 2 0 0 0 2 2147483647 0 0\nV 109 2\nD 6 52 2 1 0 2 0 0 0 0 0 8\nD 6 53 2 1 0 2 0 0 0 0 0 8\nC 110 0 1 0 0\nC 111 0 1 0 0\nC 113 2 0 0 0\nD 6 52 2 1 0 2 0 0 0 0 0 8\nD 6 53 2 1 0 2 0 0 0 0 0 8\n"
 	want += "V 112 1\nD 8 66 1 1 3 0 0 0 0 0 0 5\n"
+	want += "V 200 0\nV 201 5\nD 2 21 2 0 0 0 0 0 2 0 0 2\nD 2 76 2 0 0 0 0 0 2 0 0 0\nD 2 80 0 0 0 0 0 16 16 0 0 0\nD 2 77 0 0 0 0 0 14 14 0 0 0\nD 2 89 2 0 0 0 0 17 2 0 0 0\nV 202 1\nD 2 77 0 0 0 0 0 14 14 0 0 0\nV 203 1\nD 2 78 0 0 0 0 0 15 15 0 0 0\nV 204 1\nD 2 79 0 0 0 0 0 16 16 0 0 0\nV 205 1\nD 2 80 0 0 0 0 0 19 19 0 0 0\nV 206 1\nD 2 89 2 0 0 0 0 17 1 0 0 0\nV 207 1\nD 6 94 2 3 0 4 0 0 2 0 0 1\nV 208 1\nD 6 96 2 5 0 6 0 0 2 0 0 0\nV 209 1\nD 6 97 2 6 0 7 0 0 2 0 0 0\nV 210 1\nD 6 90 2 1 0 0 0 0 2 0 0 0\nV 211 2\nD 5 44 2 5 10 0 0 1 0 0 1 1\nD 5 86 2 5 10 0 0 0 0 0 0 0\nV 212 1\nD 5 87 2 5 10 0 3 0 8 0 0 0\nV 213 1\nD 6 91 2 8 14 0 0 0 2 0 0 2\nV 214 0\nV 215 0\nV 216 1\nD 7 102 3 4 0 0 0 0 3 0 0 2\n"
+
 	var baseline string
 	for i := 0; i < 3; i++ {
 		dir := t.TempDir()

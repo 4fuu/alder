@@ -257,7 +257,11 @@ fn mir_verify_after_provenance(d: Domain, store: MirStore, indexes: MirVIndexes,
     var diagnostics = diagnostics0
     diagnostics = try mir_vphase6_with(d, store, indexes, uses, diagnostics, cleanup, provenance)
     if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
+    diagnostics = try mir_vframe_phase6(d, store, indexes, diagnostics)
+    if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
     diagnostics = cleanup.diagnostics
+    if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
+    diagnostics = try mir_vframe_phase7(d, store, indexes, diagnostics)
     if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
     diagnostics = try mir_vphase8_with(d, store, indexes, uses, diagnostics, cleanup, provenance)
     return Ok(MirVerifyOutput(diagnostics: diagnostics))

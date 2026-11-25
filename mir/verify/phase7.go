@@ -74,6 +74,10 @@ type cleanupConfig struct {
 
 func phase7Cleanup(m *mir.Module) []Error {
 	var errs []Error
+	frames, _ := buildFrameInventory(m)
+	if frames != nil {
+		errs = append(errs, frameCleanupErrors(m, frames)...)
+	}
 	for _, f := range m.Functions {
 		if f == nil || len(f.Blocks) == 0 {
 			continue
@@ -89,6 +93,9 @@ func analyzeCleanupFunction(m *mir.Module, f *mir.Function) (*cleanupAnalysis, [
 		activeAtRun:     make(map[cleanupSite][]cleanupEntry),
 		activeSetsAtRun: make(map[cleanupSite]map[string][]cleanupEntry),
 	}
+	frames, _ := buildFrameInventory(m)
+	step := frames.frameStepOf(f)
+	frameScopes := frameResidentScopes(m, frames, f, step)
 	var errs []Error
 	for vi := range f.Values {
 		scope := mir.ValueId(vi)
@@ -116,13 +123,13 @@ func analyzeCleanupFunction(m *mir.Module, f *mir.Function) (*cleanupAnalysis, [
 				}
 			}
 		}
-		es := analyzeOneScope(f, scope, entries, entryIndex, result)
+		es := analyzeOneScope(m, f, step, scope, frameScopes[scope], entries, entryIndex, result)
 		errs = append(errs, es...)
 	}
 	return result, errs
 }
 
-func analyzeOneScope(f *mir.Function, scope mir.ValueId, entries []cleanupEntry, entryIndex map[mir.ValueId]int, out *cleanupAnalysis) []Error {
+func analyzeOneScope(m *mir.Module, f *mir.Function, step *frameStepInfo, scope mir.ValueId, frameResident bool, entries []cleanupEntry, entryIndex map[mir.ValueId]int, out *cleanupAnalysis) []Error {
 	var errs []Error
 	sets := make([]map[cleanupConfig]bool, len(f.Blocks))
 	for i := range sets {
@@ -258,7 +265,7 @@ func analyzeOneScope(f *mir.Function, scope mir.ValueId, entries []cleanupEntry,
 				errs = append(errs, Error{Loc: siteLoc(f, site), Msg: msg})
 			}
 		}
-		if exitOpen[mir.BlockId(bi)] {
+		if exitOpen[mir.BlockId(bi)] && !(frameResident && frameSuspensionReturn(m, step, b)) {
 			errs = append(errs, Error{Loc: locTerm(f, b), Msg: fmt.Sprintf("exit leaves cleanup scope %%%s open or running", f.Values[scope].Name)})
 		}
 	}

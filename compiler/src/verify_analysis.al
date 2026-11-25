@@ -2014,3 +2014,1944 @@ fn mir_vmemo_forbidden(d: Domain, store: MirStore, indexes: MirVIndexes, root: U
     return Ok(found)
 }
 
+
+// ---------------------------------------------------------------------------
+// Step frames. Step frames are ordinary MIR 6 aggregates with reserved names;
+// these helpers are the single recognition point for the acceptance rules in
+// docs/mir.md "Frame access and verification". The scan validates declarations
+// for Phase 2; later phases reuse it for access, state, cleanup, and backend
+// checks. The layout mirrors mir/verify/frame.go and frame_state.go.
+
+fn mir_vframe_reserved() -> __s0_String { return "__alder_step." }
+fn mir_vframe_status_name() -> __s0_String { return "__alder_step.status" }
+fn mir_vframe_run_prefix() -> __s0_String { return "__alder_step.run." }
+fn mir_vframe_type_prefix() -> __s0_String { return "__alder_step.frame." }
+fn mir_vframe_state_prefix() -> __s0_String { return "__alder_step.state." }
+
+fn mir_vframe_field_state() -> U64 { return 1 }
+fn mir_vframe_field_param() -> U64 { return 2 }
+fn mir_vframe_field_owner() -> U64 { return 3 }
+fn mir_vframe_field_callee() -> U64 { return 4 }
+fn mir_vframe_field_callee_owner() -> U64 { return 5 }
+fn mir_vframe_field_domain() -> U64 { return 6 }
+fn mir_vframe_field_local() -> U64 { return 7 }
+fn mir_vframe_field_temp() -> U64 { return 8 }
+fn mir_vframe_field_cleanup() -> U64 { return 9 }
+fn mir_vframe_field_scope() -> U64 { return 10 }
+fn mir_vframe_field_out() -> U64 { return 11 }
+
+fn mir_vframe_prefix(store: MirStore, start: U64, end: U64, prefix: __s0_String) -> Bool {
+    if !mir_vrange_valid(start, end, __s0_buffer_len(U8, store.names)) { return false }
+    if end - start < len(prefix) { return false }
+    var at: U64 = 0
+    while at < len(prefix) { if __s0_buffer_get(U8, store.names, start + at) != prefix[at] { return false }
+        at = at + 1 }
+    return true
+}
+
+fn mir_vframe_number(store: MirStore, start: U64, end: U64) -> U64 {
+    if !mir_vrange_valid(start, end, __s0_buffer_len(U8, store.names)) || start >= end { return 0 }
+    var value: U64 = 0
+    var at = start
+    while at < end { let c = __s0_buffer_get(U8, store.names, at)
+        if c < 48 || c > 57 { return 0 }
+        value = value * 10 + (mir_vindex_hash_byte(c) - 48)
+        at = at + 1 }
+    return value + 1
+}
+
+fn mir_vframe_indexed(store: MirStore, start: U64, end: U64, prefix: __s0_String) -> U64 {
+    if !mir_vframe_prefix(store, start, end, prefix) || end - start == len(prefix) { return 0 }
+    return mir_vframe_number(store, start + len(prefix), end)
+}
+
+fn mir_vframe_type_kind_is(store: MirStore, type_id: U64, kind: U64) -> Bool {
+    return mir_vtype_exists(store, type_id) && mir_vtype_kind(store, type_id) == kind
+}
+
+type MirVFrameField {
+    ordinal: U64
+    type_id: U64
+    kind: U64
+    index: U64
+}
+type MirVFrameRec {
+    type_id: U64
+    instance_start: U64
+    instance_end: U64
+    state_type: U64
+    step: U64
+    field_start: U64
+    field_count: U64
+}
+type MirVFrameStep {
+    function: U64
+    frame_type: U64
+    state_type: U64
+    frame_param: U64
+    owner_param: U64
+}
+type MirVFrameState {
+    type_id: U64
+    instance_start: U64
+    instance_end: U64
+    variant_count: U64
+}
+type MirVFrameScan {
+    status_type: U64
+    status_found: Bool
+    reserved: Bool
+    frames: __s0_Buffer(MirVFrameRec)
+    steps: __s0_Buffer(MirVFrameStep)
+    states: __s0_Buffer(MirVFrameState)
+    fields: __s0_Buffer(MirVFrameField)
+}
+type MirVFrameScanResult {
+    scan: MirVFrameScan
+    diagnostics: __s0_Buffer(MirVerifyDiagRec)
+}
+
+fn mir_vframe_diag(d: Domain, out: __s0_Buffer(MirVerifyDiagRec), kind: U64, function: U64, block: U64, instruction: U64, type_id: U64, declaration: U64) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+    return mir_vadd(d, out, mir_vdiag(mir_verify_phase_types(), kind, function, block, instruction, 0, 0, type_id, declaration, 0, 0, 0))
+}
+
+fn mir_vframe_frame_index(scan: MirVFrameScan, type_id: U64) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirVFrameRec, scan.frames) {
+        if __s0_buffer_get(MirVFrameRec, scan.frames, at).type_id == type_id { return at + 1 }
+        at = at + 1
+    }
+    return 0
+}
+
+fn mir_vframe_state_index(scan: MirVFrameScan, type_id: U64) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirVFrameState, scan.states) {
+        if __s0_buffer_get(MirVFrameState, scan.states, at).type_id == type_id { return at + 1 }
+        at = at + 1
+    }
+    return 0
+}
+
+fn mir_vframe_step_for(scan: MirVFrameScan, function: U64) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirVFrameStep, scan.steps) {
+        if __s0_buffer_get(MirVFrameStep, scan.steps, at).function == function { return at + 1 }
+        at = at + 1
+    }
+    return 0
+}
+
+fn mir_vframe_field_index(scan: MirVFrameScan, frame_index: U64, store: MirStore, start: U64, end: U64) -> U64 {
+    let frame = __s0_buffer_get(MirVFrameRec, scan.frames, frame_index - 1)
+    var at: U64 = 0
+    while at < frame.field_count {
+        let field = __s0_buffer_get(MirVFrameField, scan.fields, frame.field_start + at)
+        let part = __s0_buffer_get(MirTypePartRec, store.type_parts, field.ordinal - 1)
+        if mir_vname_equal(store, part.name_start, part.name_end, start, end) { return at + 1 }
+        at = at + 1
+    }
+    return 0
+}
+
+fn mir_vframe_field_kind(scan: MirVFrameScan, frame_index: U64, store: MirStore, start: U64, end: U64) -> U64 {
+    let f = mir_vframe_field_index(scan, frame_index, store, start, end)
+    if f == 0 { return 0 }
+    let frame = __s0_buffer_get(MirVFrameRec, scan.frames, frame_index - 1)
+    return __s0_buffer_get(MirVFrameField, scan.fields, frame.field_start + f - 1).kind
+}
+
+fn mir_vframe_field_by_word(scan: MirVFrameScan, frame_index: U64, store: MirStore, word: __s0_String) -> U64 {
+    let frame = __s0_buffer_get(MirVFrameRec, scan.frames, frame_index - 1)
+    var at: U64 = 0
+    while at < frame.field_count {
+        let field = __s0_buffer_get(MirVFrameField, scan.fields, frame.field_start + at)
+        let part = __s0_buffer_get(MirTypePartRec, store.type_parts, field.ordinal - 1)
+        if mir_vname_word(store, part.name_start, part.name_end, word) { return at + 1 }
+        at = at + 1
+    }
+    return 0
+}
+
+fn mir_vframe_is_frame(scan: MirVFrameScan, type_id: U64) -> Bool { return mir_vframe_frame_index(scan, type_id) != 0 }
+
+fn mir_vframe_is_frame_view(scan: MirVFrameScan, store: MirStore, type_id: U64) -> Bool {
+    if !mir_vframe_type_kind_is(store, type_id, mir_type_kind_safe_mut()) { return false }
+    return mir_vframe_is_frame(scan, __s0_buffer_get(MirTypeRec, store.types, type_id - 1).elem)
+}
+
+fn mir_vframe_type_contains(d: Domain, scan: MirVFrameScan, store: MirStore, indexes: MirVIndexes, root: U64) -> Result(Bool, __s0_Error) {
+    var work = try __s0_buffer_new(U64, d)
+    work = try __s0_buffer_append(U64, d, work, root)
+    var at: U64 = 0
+    while at < __s0_buffer_len(U64, work) {
+        let id = __s0_buffer_get(U64, work, at)
+        at = at + 1
+        if id >= 1 && id <= __s0_buffer_len(MirTypeRec, store.types) {
+            if mir_vframe_is_frame(scan, id) { return Ok(true) }
+            let before = __s0_buffer_len(U64, work)
+            work = try mir_vappend_type_children(d, store, indexes, work, id)
+            // Deduplicate by scanning the prefix; frame modules are small.
+            var added = before
+            while added < __s0_buffer_len(U64, work) {
+                let child = __s0_buffer_get(U64, work, added)
+                var prior: U64 = 0
+                var seen = false
+                while prior < added { if __s0_buffer_get(U64, work, prior) == child { seen = true }
+                    prior = prior + 1 }
+                if seen { __s0_buffer_set(U64, work, added, 0) }
+                added = added + 1
+            }
+        }
+    }
+    return Ok(false)
+}
+
+fn mir_vframe_variant(store: MirStore, indexes: MirVIndexes, type_id: U64, ordinal: U64) -> U64 {
+    let total = mir_vindex_type_part_count(indexes, type_id)
+    var at: U64 = 0
+    while at < total {
+        let part = __s0_buffer_get(MirTypePartRec, store.type_parts, mir_vindex_type_part(indexes, type_id, at) - 1)
+        if part.kind == mir_type_part_variant() && part.ordinal == ordinal { return mir_vindex_type_part(indexes, type_id, at) }
+        at = at + 1
+    }
+    return 0
+}
+
+fn mir_vframe_field_part(store: MirStore, indexes: MirVIndexes, type_id: U64, ordinal: U64) -> U64 {
+    let total = mir_vindex_type_part_count(indexes, type_id)
+    var at: U64 = 0
+    while at < total {
+        let part = __s0_buffer_get(MirTypePartRec, store.type_parts, mir_vindex_type_part(indexes, type_id, at) - 1)
+        if part.kind == mir_type_part_field() && part.ordinal == ordinal { return mir_vindex_type_part(indexes, type_id, at) }
+        at = at + 1
+    }
+    return 0
+}
+
+fn mir_vframe_state_variant_count(store: MirStore, indexes: MirVIndexes, type_id: U64) -> U64 {
+    let total = mir_vindex_type_part_count(indexes, type_id)
+    var count: U64 = 0
+    var at: U64 = 0
+    while at < total {
+        if __s0_buffer_get(MirTypePartRec, store.type_parts, mir_vindex_type_part(indexes, type_id, at) - 1).kind == mir_type_part_variant() { count = count + 1 }
+        at = at + 1
+    }
+    return count
+}
+
+fn mir_vframe_param_value(store: MirStore, indexes: MirVIndexes, function: U64, ordinal: U64) -> U64 {
+    let count = mir_vindex_param_count(indexes, function)
+    var at: U64 = 0
+    while at < count {
+        let p = __s0_buffer_get(MirParamRec, store.params, mir_vindex_param(indexes, function, at) - 1)
+        if p.block == 0 && p.kind == mir_param_function() && p.ordinal == ordinal { return p.value }
+        at = at + 1
+    }
+    return 0
+}
+
+fn mir_vtype_contains_frame_name(d: Domain, store: MirStore, indexes: MirVIndexes, root: U64) -> Result(Bool, __s0_Error) {
+    var work = try __s0_buffer_new(U64, d)
+    work = try __s0_buffer_append(U64, d, work, root)
+    var at: U64 = 0
+    while at < __s0_buffer_len(U64, work) {
+        let id = __s0_buffer_get(U64, work, at)
+        at = at + 1
+        if id >= 1 && id <= __s0_buffer_len(MirTypeRec, store.types) {
+            let t = __s0_buffer_get(MirTypeRec, store.types, id - 1)
+            if t.kind == mir_type_kind_aggregate() && mir_vframe_prefix(store, t.name_start, t.name_end, mir_vframe_type_prefix()) { return Ok(true) }
+            let before = __s0_buffer_len(U64, work)
+            work = try mir_vappend_type_children(d, store, indexes, work, id)
+            var added = before
+            while added < __s0_buffer_len(U64, work) {
+                let child = __s0_buffer_get(U64, work, added)
+                var prior: U64 = 0
+                var seen = false
+                while prior < added { if __s0_buffer_get(U64, work, prior) == child { seen = true }
+                    prior = prior + 1 }
+                if seen { __s0_buffer_set(U64, work, added, 0) }
+                added = added + 1
+            }
+        }
+    }
+    return Ok(false)
+}
+
+fn mir_vframe_scan(d: Domain, store: MirStore, indexes: MirVIndexes) -> Result(MirVFrameScanResult, __s0_Error) {
+    var frames = try __s0_buffer_new(MirVFrameRec, d)
+    var steps = try __s0_buffer_new(MirVFrameStep, d)
+    var states = try __s0_buffer_new(MirVFrameState, d)
+    var fields = try __s0_buffer_new(MirVFrameField, d)
+    var out = try __s0_buffer_new(MirVerifyDiagRec, d)
+    var reserved = false
+    var status_type: U64 = 0
+    var status_found = false
+    var type_total = __s0_buffer_len(MirTypeRec, store.types)
+    var tid: U64 = 1
+    while tid <= type_total {
+        let t = __s0_buffer_get(MirTypeRec, store.types, tid - 1)
+        if mir_vframe_prefix(store, t.name_start, t.name_end, mir_vframe_reserved()) {
+            reserved = true
+            if mir_vname_word(store, t.name_start, t.name_end, mir_vframe_status_name()) {
+                if t.kind == mir_type_kind_enum() { status_type = tid
+                    status_found = true
+                } else { out = try mir_vframe_diag(d, out, mir_vdiag_frame_status_shape(), 0, 0, 0, tid, tid) }
+            } else {
+                if mir_vframe_prefix(store, t.name_start, t.name_end, mir_vframe_type_prefix()) {
+                    if t.kind == mir_type_kind_aggregate() {
+                        frames = try __s0_buffer_append(MirVFrameRec, d, frames, MirVFrameRec(type_id: tid, instance_start: t.name_start + len(mir_vframe_type_prefix()), instance_end: t.name_end, state_type: 0, step: 0, field_start: 0, field_count: 0))
+                    } else { out = try mir_vframe_diag(d, out, mir_vdiag_frame_record_shape(), 0, 0, 0, tid, tid) }
+                } else {
+                    if mir_vframe_prefix(store, t.name_start, t.name_end, mir_vframe_state_prefix()) {
+                        if t.kind == mir_type_kind_enum() {
+                            states = try __s0_buffer_append(MirVFrameState, d, states, MirVFrameState(type_id: tid, instance_start: t.name_start + len(mir_vframe_state_prefix()), instance_end: t.name_end, variant_count: 0))
+                        } else { out = try mir_vframe_diag(d, out, mir_vdiag_frame_state_shape(), 0, 0, 0, tid, tid) }
+                    } else { out = try mir_vframe_diag(d, out, mir_vdiag_frame_reserved_name(), 0, 0, 0, tid, tid) }
+                }
+            }
+        }
+        tid = tid + 1
+    }
+    // Reserved names are compiler-owned on every declaration form.
+    var cid: U64 = 1
+    while cid <= __s0_buffer_len(MirConstRec, store.constants) {
+        let c = __s0_buffer_get(MirConstRec, store.constants, cid - 1)
+        if mir_vframe_prefix(store, c.name_start, c.name_end, mir_vframe_reserved()) { out = try mir_vframe_diag(d, out, mir_vdiag_frame_reserved_name(), 0, 0, 0, 0, cid) }
+        cid = cid + 1
+    }
+    var iid: U64 = 1
+    while iid <= __s0_buffer_len(MirImportRec, store.imports) {
+        let item = __s0_buffer_get(MirImportRec, store.imports, iid - 1)
+        if mir_vframe_prefix(store, item.name_start, item.name_end, mir_vframe_reserved()) { out = try mir_vframe_diag(d, out, mir_vdiag_frame_reserved_name(), 0, 0, 0, 0, iid) }
+        iid = iid + 1
+    }
+    var bid: U64 = 1
+    while bid <= __s0_buffer_len(MirBindingRec, store.bindings) {
+        let b = __s0_buffer_get(MirBindingRec, store.bindings, bid - 1)
+        if mir_vframe_prefix(store, b.name_start, b.name_end, mir_vframe_reserved()) { out = try mir_vframe_diag(d, out, mir_vdiag_frame_reserved_name(), 0, 0, 0, 0, bid) }
+        bid = bid + 1
+    }
+    var bfid: U64 = 1
+    while bfid <= __s0_buffer_len(MirBindingFnRec, store.binding_funcs) {
+        let bf = __s0_buffer_get(MirBindingFnRec, store.binding_funcs, bfid - 1)
+        if mir_vframe_prefix(store, bf.name_start, bf.name_end, mir_vframe_reserved()) { out = try mir_vframe_diag(d, out, mir_vdiag_frame_reserved_name(), 0, 0, 0, 0, bfid) }
+        bfid = bfid + 1
+    }
+    // Parse frame fields in declaration order. Signature-level field checks
+    // only need the frame type-id set, so the partially built scan is enough.
+    let scan_so_far = MirVFrameScan(status_type: status_type, status_found: status_found, reserved: reserved, frames: frames, steps: steps, states: states, fields: fields)
+    var fi: U64 = 1
+    while fi <= __s0_buffer_len(MirVFrameRec, frames) {
+        var frame = __s0_buffer_get(MirVFrameRec, frames, fi - 1)
+        var fparts = try __s0_buffer_new(U64, d)
+        let total = mir_vindex_type_part_count(indexes, frame.type_id)
+        var at: U64 = 0
+        while at < total {
+            let pid = mir_vindex_type_part(indexes, frame.type_id, at)
+            if __s0_buffer_get(MirTypePartRec, store.type_parts, pid - 1).kind == mir_type_part_field() { fparts = try __s0_buffer_append(U64, d, fparts, pid) }
+            at = at + 1
+        }
+        let field_start = __s0_buffer_len(MirVFrameField, fields)
+        var good = true
+        var pi: U64 = 0
+        var pcount: U64 = 0
+        var xcount: U64 = 0
+        var dcount: U64 = 0
+        var lcount: U64 = 0
+        var vcount: U64 = 0
+        var ccount: U64 = 0
+        var scount: U64 = 0
+        if __s0_buffer_len(U64, fparts) == 0 { good = false } else {
+            let p0 = __s0_buffer_get(MirTypePartRec, store.type_parts, __s0_buffer_get(U64, fparts, 0) - 1)
+            if !mir_vname_word(store, p0.name_start, p0.name_end, "state") { good = false } else {
+                frame.state_type = p0.part_type
+                fields = try __s0_buffer_append(MirVFrameField, d, fields, MirVFrameField(ordinal: p0.ordinal + 1, type_id: p0.part_type, kind: mir_vframe_field_state(), index: 0))
+                pi = 1
+            }
+        }
+        if !good { out = try mir_vframe_diag(d, out, mir_vdiag_frame_record_shape(), 0, 0, 0, frame.type_id, frame.type_id) }
+        while good && pi < __s0_buffer_len(U64, fparts) {
+            let pid = __s0_buffer_get(U64, fparts, pi)
+            let p = __s0_buffer_get(MirTypePartRec, store.type_parts, pid - 1)
+            let pidx = mir_vframe_indexed(store, p.name_start, p.name_end, "p")
+            if pidx != 0 {
+                if pidx != pcount + 1 { good = false } else {
+                    pcount = pcount + 1
+                    fields = try __s0_buffer_append(MirVFrameField, d, fields, MirVFrameField(ordinal: p.ordinal + 1, type_id: p.part_type, kind: mir_vframe_field_param(), index: pidx - 1))
+                    pi = pi + 1
+                    var borrowed = mir_vframe_type_kind_is(store, p.part_type, mir_type_kind_safe_mut())
+                    if pi < __s0_buffer_len(U64, fparts) {
+                        let q = __s0_buffer_get(MirTypePartRec, store.type_parts, __s0_buffer_get(U64, fparts, pi) - 1)
+                        let oidx = mir_vframe_indexed(store, q.name_start, q.name_end, "o")
+                        if oidx != 0 {
+                            if oidx != pidx || !borrowed { good = false } else {
+                                if !mir_vframe_type_kind_is(store, q.part_type, mir_type_kind_domain_handle()) { good = false }
+                                fields = try __s0_buffer_append(MirVFrameField, d, fields, MirVFrameField(ordinal: q.ordinal + 1, type_id: q.part_type, kind: mir_vframe_field_owner(), index: pidx - 1))
+                                pi = pi + 1
+                            }
+                        } else { if borrowed { good = false } }
+                    } else { if borrowed { good = false } }
+                }
+            } else {
+                let xidx = mir_vframe_indexed(store, p.name_start, p.name_end, "x")
+                if xidx != 0 {
+                    if xidx != xcount + 1 || pi + 1 >= __s0_buffer_len(U64, fparts) { good = false } else {
+                        let q = __s0_buffer_get(MirTypePartRec, store.type_parts, __s0_buffer_get(U64, fparts, pi + 1) - 1)
+                        let yidx = mir_vframe_indexed(store, q.name_start, q.name_end, "y")
+                        if yidx != xidx { good = false } else {
+                            if !mir_vframe_type_kind_is(store, p.part_type, mir_type_kind_safe_mut()) { good = false } else {
+                                if !mir_vframe_is_frame(scan_so_far, __s0_buffer_get(MirTypeRec, store.types, p.part_type - 1).elem) { good = false } }
+                            if !mir_vframe_type_kind_is(store, q.part_type, mir_type_kind_domain_handle()) { good = false }
+                            xcount = xcount + 1
+                            fields = try __s0_buffer_append(MirVFrameField, d, fields, MirVFrameField(ordinal: p.ordinal + 1, type_id: p.part_type, kind: mir_vframe_field_callee(), index: xidx - 1))
+                            fields = try __s0_buffer_append(MirVFrameField, d, fields, MirVFrameField(ordinal: q.ordinal + 1, type_id: q.part_type, kind: mir_vframe_field_callee_owner(), index: xidx - 1))
+                            pi = pi + 2
+                        }
+                    }
+                } else {
+                    let didx = mir_vframe_indexed(store, p.name_start, p.name_end, "d")
+                    let lidx = mir_vframe_indexed(store, p.name_start, p.name_end, "l")
+                    let vidx = mir_vframe_indexed(store, p.name_start, p.name_end, "v")
+                    let cidx = mir_vframe_indexed(store, p.name_start, p.name_end, "c")
+                    if didx != 0 {
+                        if didx != dcount + 1 || lcount != 0 || vcount != 0 || ccount != 0 || scount != 0 || !mir_vframe_type_kind_is(store, p.part_type, mir_type_kind_domain_handle()) { good = false } else {
+                            dcount = dcount + 1
+                            fields = try __s0_buffer_append(MirVFrameField, d, fields, MirVFrameField(ordinal: p.ordinal + 1, type_id: p.part_type, kind: mir_vframe_field_domain(), index: didx - 1))
+                            pi = pi + 1
+                        }
+                    } else {
+                        if lidx != 0 {
+                            if lidx != lcount + 1 || vcount != 0 || ccount != 0 || scount != 0 { good = false } else {
+                                lcount = lcount + 1
+                                fields = try __s0_buffer_append(MirVFrameField, d, fields, MirVFrameField(ordinal: p.ordinal + 1, type_id: p.part_type, kind: mir_vframe_field_local(), index: lidx - 1))
+                                pi = pi + 1
+                            }
+                        } else {
+                            if vidx != 0 {
+                                if vidx != vcount + 1 || ccount != 0 || scount != 0 { good = false } else {
+                                    vcount = vcount + 1
+                                    fields = try __s0_buffer_append(MirVFrameField, d, fields, MirVFrameField(ordinal: p.ordinal + 1, type_id: p.part_type, kind: mir_vframe_field_temp(), index: vidx - 1))
+                                    pi = pi + 1
+                                }
+                            } else {
+                                if cidx != 0 {
+                                    if cidx != ccount + 1 || scount != 0 || !mir_vframe_type_kind_is(store, p.part_type, mir_type_kind_cleanup_id()) { good = false } else {
+                                        ccount = ccount + 1
+                                        fields = try __s0_buffer_append(MirVFrameField, d, fields, MirVFrameField(ordinal: p.ordinal + 1, type_id: p.part_type, kind: mir_vframe_field_cleanup(), index: cidx - 1))
+                                        pi = pi + 1
+                                    }
+                                } else {
+                                    let sidx = mir_vframe_indexed(store, p.name_start, p.name_end, "s")
+                                    if sidx != 0 {
+                                        if sidx != scount + 1 || !mir_vframe_type_kind_is(store, p.part_type, mir_type_kind_cleanup_scope()) { good = false } else {
+                                            scount = scount + 1
+                                            fields = try __s0_buffer_append(MirVFrameField, d, fields, MirVFrameField(ordinal: p.ordinal + 1, type_id: p.part_type, kind: mir_vframe_field_scope(), index: sidx - 1))
+                                            pi = pi + 1
+                                        }
+                                    } else {
+                                        // The only remaining legal field is the final out.
+                                        if mir_vname_word(store, p.name_start, p.name_end, "out") && pi + 1 == __s0_buffer_len(U64, fparts) {
+                                            fields = try __s0_buffer_append(MirVFrameField, d, fields, MirVFrameField(ordinal: p.ordinal + 1, type_id: p.part_type, kind: mir_vframe_field_out(), index: 0))
+                                            pi = pi + 1
+                                        } else { good = false }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // A frame with fields but no parsed out is malformed.
+        if good {
+            var has_out = false
+            var at2: U64 = 0
+            while at2 < __s0_buffer_len(MirVFrameField, fields) - field_start {
+                if __s0_buffer_get(MirVFrameField, fields, field_start + at2).kind == mir_vframe_field_out() { has_out = true }
+                at2 = at2 + 1
+            }
+            if !has_out { good = false }
+        }
+        if !good { out = try mir_vframe_diag(d, out, mir_vdiag_frame_record_shape(), 0, 0, 0, frame.type_id, frame.type_id) }
+        // Field kind restrictions that the shape parser does not cover.
+        let partial = MirVFrameScan(status_type: status_type, status_found: status_found, reserved: reserved, frames: frames, steps: steps, states: states, fields: fields)
+        var at3: U64 = 0
+        while at3 < __s0_buffer_len(MirVFrameField, fields) - field_start {
+            let field = __s0_buffer_get(MirVFrameField, fields, field_start + at3)
+            let bad_table = try mir_vmemo_contains(d, store, indexes, field.type_id, mir_type_kind_table_view())
+            let bad_mut_table = try mir_vmemo_contains(d, store, indexes, field.type_id, mir_type_kind_table_mut_view())
+            let bad_scope = try mir_vmemo_contains(d, store, indexes, field.type_id, mir_type_kind_cleanup_scope())
+            if bad_table || bad_mut_table || (bad_scope && field.kind != mir_vframe_field_scope()) { out = try mir_vframe_diag(d, out, mir_vdiag_frame_field_kind(), 0, 0, 0, frame.type_id, field.ordinal) }
+            if field.kind != mir_vframe_field_callee() && field.kind != mir_vframe_field_state() && field.kind != mir_vframe_field_out() {
+                if try mir_vframe_type_contains(d, partial, store, indexes, field.type_id) { out = try mir_vframe_diag(d, out, mir_vdiag_frame_field_kind(), 0, 0, 0, frame.type_id, field.ordinal) }
+            }
+            at3 = at3 + 1
+        }
+        frame.field_start = field_start
+        frame.field_count = __s0_buffer_len(MirVFrameField, fields) - field_start
+        __s0_buffer_set(MirVFrameRec, frames, fi - 1, frame)
+        fi = fi + 1
+    }
+    // Recognize step functions by the reserved run name and the pinned
+    // three-parameter signature.
+    var fnid: U64 = 1
+    while fnid <= __s0_buffer_len(MirFunctionRec, store.functions) {
+        let rec = __s0_buffer_get(MirFunctionRec, store.functions, fnid - 1)
+        if mir_vframe_prefix(store, rec.name_start, rec.name_end, mir_vframe_reserved()) {
+            reserved = true
+            if !mir_vframe_prefix(store, rec.name_start, rec.name_end, mir_vframe_run_prefix()) {
+                out = try mir_vframe_diag(d, out, mir_vdiag_frame_reserved_name(), fnid, 0, 0, 0, fnid)
+            } else {
+                var ok = true
+                if mir_v5_function_param_count(store, indexes, fnid) != 3 { ok = false }
+                var frame_elem: U64 = 0
+                if ok {
+                    let t0 = mir_v5_param_type(store, indexes, fnid, 0, mir_param_function(), 0)
+                    let t1 = mir_v5_param_type(store, indexes, fnid, 0, mir_param_function(), 1)
+                    let t2 = mir_v5_param_type(store, indexes, fnid, 0, mir_param_function(), 2)
+                    if !mir_vframe_type_kind_is(store, t0, mir_type_kind_domain_handle()) { ok = false }
+                    if !mir_vframe_type_kind_is(store, t1, mir_type_kind_safe_mut()) { ok = false } else {
+                        frame_elem = __s0_buffer_get(MirTypeRec, store.types, t1 - 1).elem
+                        if !mir_vframe_is_frame(MirVFrameScan(status_type: status_type, status_found: status_found, reserved: reserved, frames: frames, steps: steps, states: states, fields: fields), frame_elem) { ok = false }
+                    }
+                    if !mir_vframe_type_kind_is(store, t2, mir_type_kind_domain_handle()) { ok = false }
+                }
+                if !status_found || rec.result_type != status_type { ok = false }
+                if ok {
+                    let f = mir_vframe_frame_index(MirVFrameScan(status_type: status_type, status_found: status_found, reserved: reserved, frames: frames, steps: steps, states: states, fields: fields), frame_elem)
+                    let fr = __s0_buffer_get(MirVFrameRec, frames, f - 1)
+                    if !mir_vname_equal(store, rec.name_start + len(mir_vframe_run_prefix()), rec.name_end, fr.instance_start, fr.instance_end) { ok = false }
+                }
+                if !ok { out = try mir_vframe_diag(d, out, mir_vdiag_frame_step_signature(), fnid, 0, 0, 0, fnid) }
+                if ok {
+                    steps = try __s0_buffer_append(MirVFrameStep, d, steps, MirVFrameStep(function: fnid, frame_type: frame_elem, state_type: __s0_buffer_get(MirVFrameRec, frames, mir_vframe_frame_index(MirVFrameScan(status_type: status_type, status_found: status_found, reserved: reserved, frames: frames, steps: steps, states: states, fields: fields), frame_elem) - 1).state_type, frame_param: mir_vframe_param_value(store, indexes, fnid, 1), owner_param: mir_vframe_param_value(store, indexes, fnid, 2)))
+                    let f = mir_vframe_frame_index(MirVFrameScan(status_type: status_type, status_found: status_found, reserved: reserved, frames: frames, steps: steps, states: states, fields: fields), frame_elem)
+                    var fr = __s0_buffer_get(MirVFrameRec, frames, f - 1)
+                    fr.step = fnid
+                    __s0_buffer_set(MirVFrameRec, frames, f - 1, fr)
+                }
+            }
+        }
+        fnid = fnid + 1
+    }
+    // A frame type belongs to exactly one step function, and its state field
+    // names the state enum with the same instance.
+    var fx: U64 = 1
+    while fx <= __s0_buffer_len(MirVFrameRec, frames) {
+        let frame = __s0_buffer_get(MirVFrameRec, frames, fx - 1)
+        var owners: U64 = 0
+        var owner_fn: U64 = 0
+        var sx: U64 = 1
+        while sx <= __s0_buffer_len(MirVFrameStep, steps) {
+            let step = __s0_buffer_get(MirVFrameStep, steps, sx - 1)
+            if step.frame_type == frame.type_id { owners = owners + 1
+                owner_fn = step.function }
+            sx = sx + 1
+        }
+        if owners != 1 { out = try mir_vframe_diag(d, out, mir_vdiag_frame_ownership(), owner_fn, 0, 0, frame.type_id, frame.type_id) }
+        let si = mir_vframe_state_index(MirVFrameScan(status_type: status_type, status_found: status_found, reserved: reserved, frames: frames, steps: steps, states: states, fields: fields), frame.state_type)
+        if si == 0 { out = try mir_vframe_diag(d, out, mir_vdiag_frame_record_shape(), owner_fn, 0, 0, frame.type_id, frame.type_id) } else {
+            let st = __s0_buffer_get(MirVFrameState, states, si - 1)
+            if !mir_vname_equal(store, frame.instance_start, frame.instance_end, st.instance_start, st.instance_end) { out = try mir_vframe_diag(d, out, mir_vdiag_frame_state_shape(), owner_fn, 0, 0, st.type_id, st.type_id) }
+        }
+        fx = fx + 1
+    }
+    // Every state enum belongs to exactly one frame.
+    var sti: U64 = 1
+    while sti <= __s0_buffer_len(MirVFrameState, states) {
+        let st = __s0_buffer_get(MirVFrameState, states, sti - 1)
+        var users: U64 = 0
+        var fj: U64 = 1
+        while fj <= __s0_buffer_len(MirVFrameRec, frames) {
+            if __s0_buffer_get(MirVFrameRec, frames, fj - 1).state_type == st.type_id { users = users + 1 }
+            fj = fj + 1
+        }
+        if users != 1 { out = try mir_vframe_diag(d, out, mir_vdiag_frame_state_shape(), 0, 0, 0, st.type_id, st.type_id) }
+        sti = sti + 1
+    }
+    // The status enum exists exactly when the module has step functions.
+    if __s0_buffer_len(MirVFrameStep, steps) > 0 && !status_found { out = try mir_vframe_diag(d, out, mir_vdiag_frame_step_signature(), 0, 0, 0, 0, 0) }
+    if status_found && __s0_buffer_len(MirVFrameStep, steps) == 0 { out = try mir_vframe_diag(d, out, mir_vdiag_frame_status_shape(), 0, 0, 0, status_type, status_type) }
+    if status_found {
+        var good_status = true
+        if mir_vframe_state_variant_count(store, indexes, status_type) != 4 { good_status = false } else {
+            let v0 = __s0_buffer_get(MirTypePartRec, store.type_parts, mir_vframe_variant(store, indexes, status_type, 0) - 1)
+            let v1 = __s0_buffer_get(MirTypePartRec, store.type_parts, mir_vframe_variant(store, indexes, status_type, 1) - 1)
+            let v2 = __s0_buffer_get(MirTypePartRec, store.type_parts, mir_vframe_variant(store, indexes, status_type, 2) - 1)
+            let v3 = __s0_buffer_get(MirTypePartRec, store.type_parts, mir_vframe_variant(store, indexes, status_type, 3) - 1)
+            if !mir_vname_word(store, v0.name_start, v0.name_end, "done") || v0.part_type != mir_type_unit() { good_status = false }
+            if !mir_vname_word(store, v1.name_start, v1.name_end, "call") || v1.part_type != mir_type_unit() { good_status = false }
+            if !mir_vname_word(store, v2.name_start, v2.name_end, "park") || v2.part_type != mir_type_unit() { good_status = false }
+            if !mir_vname_word(store, v3.name_start, v3.name_end, "cancelled") || v3.part_type != mir_type_unit() { good_status = false }
+        }
+        if !good_status { out = try mir_vframe_diag(d, out, mir_vdiag_frame_status_shape(), 0, 0, 0, status_type, status_type) }
+    }
+    // State variants: entry, then contiguous resume<i>, then contiguous
+    // cleanup<i>, all unit-payload.
+    var sv: U64 = 1
+    while sv <= __s0_buffer_len(MirVFrameState, states) {
+        let st = __s0_buffer_get(MirVFrameState, states, sv - 1)
+        var good_state = mir_vframe_state_variant_count(store, indexes, st.type_id) > 0
+        var next_resume: U64 = 1
+        var next_cleanup: U64 = 1
+        var cleanup_seen = false
+        var vi: U64 = 0
+        while vi < mir_vframe_state_variant_count(store, indexes, st.type_id) {
+            let v = __s0_buffer_get(MirTypePartRec, store.type_parts, mir_vframe_variant(store, indexes, st.type_id, vi) - 1)
+            if v.part_type != mir_type_unit() { good_state = false }
+            if vi == 0 {
+                if !mir_vname_word(store, v.name_start, v.name_end, "entry") { good_state = false }
+            } else {
+                let r = mir_vframe_indexed(store, v.name_start, v.name_end, "resume")
+                let c = mir_vframe_indexed(store, v.name_start, v.name_end, "cleanup")
+                if r != 0 && !cleanup_seen {
+                    if r != next_resume { good_state = false }
+                    next_resume = next_resume + 1
+                } else {
+                    if c != 0 {
+                        cleanup_seen = true
+                        if c != next_cleanup { good_state = false }
+                        next_cleanup = next_cleanup + 1
+                    } else { good_state = false }
+                }
+            }
+            vi = vi + 1
+        }
+        if !good_state { out = try mir_vframe_diag(d, out, mir_vdiag_frame_state_shape(), 0, 0, 0, st.type_id, st.type_id) }
+        sv = sv + 1
+    }
+    // Frame types appear only in the owning step's borrowed frame parameter,
+    // its x<i> fields, and allocation element operands. Every other
+    // declaration position rejects them.
+    let decl_scan = MirVFrameScan(status_type: status_type, status_found: status_found, reserved: reserved, frames: frames, steps: steps, states: states, fields: fields)
+    var dt: U64 = 1
+    while dt <= __s0_buffer_len(MirTypeRec, store.types) {
+        let t = __s0_buffer_get(MirTypeRec, store.types, dt - 1)
+        if (t.kind == mir_type_kind_aggregate() || t.kind == mir_type_kind_enum()) && !mir_vframe_is_frame(decl_scan, dt) {
+            if try mir_vframe_type_contains(d, decl_scan, store, indexes, dt) { out = try mir_vframe_diag(d, out, mir_vdiag_frame_type_use(), 0, 0, 0, dt, dt) }
+        }
+        dt = dt + 1
+    }
+    var lt: U64 = 1
+    while lt <= __s0_buffer_len(MirLocalRec, store.locals) {
+        let l = __s0_buffer_get(MirLocalRec, store.locals, lt - 1)
+        if try mir_vframe_type_contains(d, decl_scan, store, indexes, l.local_type) { out = try mir_vframe_diag(d, out, mir_vdiag_frame_type_use(), l.function, 0, 0, l.local_type, lt) }
+        lt = lt + 1
+    }
+    var pt: U64 = 1
+    while pt <= __s0_buffer_len(MirParamRec, store.params) {
+        let p = __s0_buffer_get(MirParamRec, store.params, pt - 1)
+        var allowed = false
+        if p.kind == mir_param_function() { let step_at = mir_vframe_step_for(decl_scan, p.function)
+            if step_at != 0 { let st = __s0_buffer_get(MirVFrameStep, steps, step_at - 1)
+                if p.ordinal == 1 && mir_vframe_is_frame_view(decl_scan, store, p.param_type) { allowed = true } } }
+        if !allowed && try mir_vframe_type_contains(d, decl_scan, store, indexes, p.param_type) { out = try mir_vframe_diag(d, out, mir_vdiag_frame_type_use(), p.function, p.block, 0, p.param_type, pt) }
+        pt = pt + 1
+    }
+    var ft: U64 = 1
+    while ft <= __s0_buffer_len(MirFunctionRec, store.functions) {
+        let f = __s0_buffer_get(MirFunctionRec, store.functions, ft - 1)
+        if try mir_vframe_type_contains(d, decl_scan, store, indexes, f.result_type) { out = try mir_vframe_diag(d, out, mir_vdiag_frame_type_use(), ft, 0, 0, f.result_type, ft) }
+        ft = ft + 1
+    }
+    var ct: U64 = 1
+    while ct <= __s0_buffer_len(MirConstRec, store.constants) {
+        let c = __s0_buffer_get(MirConstRec, store.constants, ct - 1)
+        if try mir_vframe_type_contains(d, decl_scan, store, indexes, c.const_type) { out = try mir_vframe_diag(d, out, mir_vdiag_frame_type_use(), 0, 0, 0, c.const_type, ct) }
+        ct = ct + 1
+    }
+    return Ok(MirVFrameScanResult(scan: MirVFrameScan(status_type: status_type, status_found: status_found, reserved: reserved, frames: frames, steps: steps, states: states, fields: fields), diagnostics: out))
+}
+
+// A field place is field(deref %v, name); report whether the deref base is v.
+fn mir_vframe_field_place(store: MirStore, place: U64, deref: U64) -> Bool {
+    if place == 0 { return false }
+    var p = place
+    var direct = false
+    var steps: U64 = 0
+    while p != 0 && steps <= __s0_buffer_len(MirPlaceRec, store.places) {
+        let rec = __s0_buffer_get(MirPlaceRec, store.places, p - 1)
+        if rec.kind == mir_place_deref() { return direct && rec.deref_value == deref }
+        if rec.kind == mir_place_field() { direct = true
+            p = rec.base
+        } else { return false }
+        steps = steps + 1
+    }
+    return false
+}
+
+// Return the field name range of a direct field place, or 0/0 when the place
+// is not a direct field on a deref. Start is stored in the sign bit? No: use
+// a companion that returns the field part id instead.
+fn mir_vframe_field_part_of(store: MirStore, indexes: MirVIndexes, function: U64, place: U64, deref: U64) -> U64 {
+    if place == 0 { return 0 }
+    let rec = __s0_buffer_get(MirPlaceRec, store.places, place - 1)
+    if rec.kind != mir_place_field() { return 0 }
+    if !mir_vframe_field_place(store, place, deref) { return 0 }
+    // Resolve the field against the base type of the deref view.
+    let view_type = mir_v5_value_type(store, indexes, function, deref)
+    if !mir_vframe_type_kind_is(store, view_type, mir_type_kind_safe_mut()) { return 0 }
+    let base = __s0_buffer_get(MirTypeRec, store.types, view_type - 1).elem
+    let total = mir_vindex_type_part_count(indexes, base)
+    var at: U64 = 0
+    while at < total {
+        let part = __s0_buffer_get(MirTypePartRec, store.type_parts, mir_vindex_type_part(indexes, base, at) - 1)
+        if part.kind == mir_type_part_field() && mir_vname_equal(store, rec.field_start, rec.field_end, part.name_start, part.name_end) { return mir_vindex_type_part(indexes, base, at) }
+        at = at + 1
+    }
+    return 0
+}
+
+fn mir_vframe_field_part_word(store: MirStore, part_id: U64, word: __s0_String) -> Bool {
+    if part_id == 0 { return false }
+    let part = __s0_buffer_get(MirTypePartRec, store.type_parts, part_id - 1)
+    return mir_vname_word(store, part.name_start, part.name_end, word)
+}
+
+fn mir_vframe_value_is_alloc(store: MirStore, indexes: MirVIndexes, function: U64, value: U64) -> Bool {
+    let vi = mir_vindex_value(indexes, function, value)
+    if vi == 0 { return false }
+    let v = __s0_buffer_get(MirValueRec, store.values, vi - 1)
+    if v.def_kind != mir_value_def_instruction() { return false }
+    let iid = mir_vindex_instr(indexes, function, v.block, v.item - 1)
+    if iid == 0 { return false }
+    let x = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
+    return x.op == mir_op_alloc() || x.op == mir_op_alloc_checked()
+}
+
+fn mir_vframe_value_is_view(scan: MirVFrameScan, store: MirStore, indexes: MirVIndexes, function: U64, value: U64) -> Bool {
+    let t = mir_v5_value_type(store, indexes, function, value)
+    return mir_vframe_is_frame_view(scan, store, t)
+}
+
+// Phase 5 frame checks: the borrowed step frame is a deref field base only, a
+// frame field place is never borrowed out, a frame view never escapes, and a
+// frame record is never a value. Uses come from the shared V4 inventory.
+fn mir_vframe_phase5(d: Domain, store: MirStore, indexes: MirVIndexes, out0: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+    var out = out0
+    let scanned = try mir_vframe_scan(d, store, indexes)
+    let scan = scanned.scan
+    if !scan.reserved { return Ok(out) }
+    let inventory = try mir_vp4_use_inventory_build(d, store, indexes)
+    var function: U64 = 1
+    while function <= __s0_buffer_len(MirFunctionRec, store.functions) {
+        let step_index = mir_vframe_step_for(scan, function)
+        var frame_param: U64 = 0
+        if step_index != 0 { frame_param = __s0_buffer_get(MirVFrameStep, scan.steps, step_index - 1).frame_param }
+        // Value-level rules.
+        var value: U64 = 1
+        while mir_vindex_value(indexes, function, value) != 0 {
+            let vi = mir_vindex_value(indexes, function, value)
+            let v = __s0_buffer_get(MirValueRec, store.values, vi - 1)
+            let view = mir_vframe_is_frame_view(scan, store, v.value_type)
+            // A frame record is never an ordinary value. safe_mut(frame) views
+            // are handled as views below.
+            var contains_value = false
+            if !view {
+                contains_value = try mir_vframe_type_contains(d, scan, store, indexes, v.value_type)
+            }
+            if contains_value { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_typing(), mir_vdiag_frame_type_use(), function, 0, 0, 0, 0, v.value_type, vi, 0, 0, value)) }
+            if view && value != frame_param {
+                let start = __s0_buffer_get(U64, inventory.value_start, vi - 1)
+                let count = __s0_buffer_get(U64, inventory.value_count, vi - 1)
+                var ui: U64 = 0
+                while ui < count {
+                    let use = __s0_buffer_get(MirVP4Use, inventory.uses, __s0_buffer_get(U64, inventory.value_use_ids, start + ui) - 1)
+                    if use.terminator != 0 { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_typing(), mir_vdiag_frame_escape(), function, use.block, 0, use.terminator, 0, v.value_type, vi, 0, 0, value)) } else {
+                        if use.operand != 0 {
+                            // The fresh allocation stored into the allocating
+                            // step's own x<i> is the one legal value use.
+                            var allowed = false
+                            if use.instruction != 0 {
+                                let x = __s0_buffer_get(MirInstrRec, store.instructions, use.instruction - 1)
+                                if x.op == mir_op_store() && x.a == value && mir_vframe_value_is_alloc(store, indexes, function, value) {
+                                    let part = mir_vframe_field_part_of(store, indexes, function, x.place, frame_param)
+                                    if part != 0 { let rec = __s0_buffer_get(MirTypePartRec, store.type_parts, part - 1)
+                                        if mir_vframe_indexed(store, rec.name_start, rec.name_end, "x") != 0 { allowed = true } }
+                                }
+                            }
+                            if !allowed { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_typing(), mir_vdiag_frame_escape(), function, use.block, use.instruction, 0, use.operand, v.value_type, vi, 0, 0, value)) }
+                        }
+                    }
+                    ui = ui + 1
+                }
+            }
+            value = value + 1
+        }
+        // Instruction-level rules.
+        var block: U64 = 1
+        let bcount = mir_vindex_block_count(indexes, function)
+        while block <= bcount {
+            let block_count = mir_vindex_instr_count(indexes, function, block)
+            var ii: U64 = 0
+            while ii < block_count {
+                let iid = mir_vindex_instr(indexes, function, block, ii)
+                let x = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
+                if x.op == mir_op_call() || x.op == mir_op_fn_value() {
+                    if mir_vframe_step_for(scan, x.target) != 0 { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_typing(), mir_vdiag_frame_step_call(), function, block, iid, 0, 0, 0, x.target, 0, 0, x.target)) }
+                }
+                if x.op == mir_op_aggregate_construct() && mir_vframe_is_frame(scan, x.type_op) { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_typing(), mir_vdiag_frame_type_use(), function, block, iid, 0, 0, x.type_op, iid, 0, 0, 0)) }
+                // The borrowed step frame is never a value operand.
+                if frame_param != 0 {
+                    var param_bad = x.a == frame_param || x.b == frame_param || x.c == frame_param
+                    let ototal = mir_vindex_op_instr_count(indexes, iid)
+                    var oi: U64 = 0
+                    while oi < ototal { let o = __s0_buffer_get(MirOperandRec, store.operands, mir_vindex_op_instr(indexes, iid, oi) - 1)
+                        if o.value == frame_param && o.kind != mir_operand_switch_case() { param_bad = true }
+                        oi = oi + 1 }
+                    if param_bad { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_typing(), mir_vdiag_frame_param_use(), function, block, iid, 0, x.place, 0, 0, 0, 0, 0)) }
+                }
+                if x.op == mir_op_borrow() || x.op == mir_op_borrow_mut() || x.op == mir_op_c_addr() {
+                    let part = mir_vframe_field_part_of(store, indexes, function, x.place, frame_param)
+                    if part != 0 { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_typing(), mir_vdiag_frame_alias_out(), function, block, iid, 0, x.place, 0, part, 0, 0, 0)) }
+                }
+                // The borrowed step frame is only a deref field base.
+                if x.place != 0 {
+                    let rec = __s0_buffer_get(MirPlaceRec, store.places, x.place - 1)
+                    let uses_place = x.op == mir_op_load() || x.op == mir_op_store() || x.op == mir_op_borrow() || x.op == mir_op_borrow_mut() || x.op == mir_op_c_addr() || x.op == mir_op_c_field_set() || (x.op == mir_op_cleanup_push() && rec.kind != mir_place_local())
+                    if uses_place {
+                        var current = x.place
+                        var direct = false
+                        var bad = false
+                        var steps: U64 = 0
+                        while current != 0 && steps <= __s0_buffer_len(MirPlaceRec, store.places) {
+                            let pr = __s0_buffer_get(MirPlaceRec, store.places, current - 1)
+                            if pr.kind == mir_place_deref() { if pr.deref_value == frame_param && !direct { bad = true }
+                                current = 0
+                            } else { if pr.kind == mir_place_field() { direct = true
+                                current = pr.base
+                            } else { current = 0 } }
+                            steps = steps + 1
+                        }
+                        if bad { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_typing(), mir_vdiag_frame_param_use(), function, block, iid, 0, x.place, 0, 0, 0, 0, 0)) }
+                    }
+                }
+                ii = ii + 1
+            }
+            block = block + 1
+        }
+        // Terminators carry ordinary values only.
+        block = 1
+        while block <= bcount {
+            let term_id = mir_vindex_term(indexes, function, block)
+            if term_id != 0 {
+                let t = __s0_buffer_get(MirTermRec, store.terminators, term_id - 1)
+                var bad = false
+                if mir_vframe_is_frame_view(scan, store, mir_v5_value_type(store, indexes, function, t.value)) && t.value != 0 { bad = true }
+                let total = mir_vindex_op_term_count(indexes, term_id)
+                var oi: U64 = 0
+                while oi < total {
+                    let c = __s0_buffer_get(MirOperandRec, store.operands, mir_vindex_op_term(indexes, term_id, oi) - 1)
+                    if c.kind == mir_operand_terminator_arg() || c.kind == mir_operand_switch_case_arg() { if mir_vframe_is_frame_view(scan, store, mir_v5_value_type(store, indexes, function, c.value)) { bad = true } }
+                    oi = oi + 1
+                }
+                if bad { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_typing(), mir_vdiag_frame_escape(), function, block, 0, term_id, 0, 0, 0, 0, 0, 0)) }
+            }
+            block = block + 1
+        }
+        function = function + 1
+    }
+    return Ok(out)
+}
+
+fn mir_vframe_field_pos(scan: MirVFrameScan, frame_index: U64, kind: U64, index: U64) -> U64 {
+    let frame = __s0_buffer_get(MirVFrameRec, scan.frames, frame_index - 1)
+    var at: U64 = 0
+    while at < frame.field_count {
+        let field = __s0_buffer_get(MirVFrameField, scan.fields, frame.field_start + at)
+        if field.kind == kind && (kind == mir_vframe_field_state() || kind == mir_vframe_field_out() || field.index == index) { return at + 1 }
+        at = at + 1
+    }
+    return 0
+}
+
+fn mir_vframe_field_pos_part(scan: MirVFrameScan, store: MirStore, frame_index: U64, part_id: U64) -> U64 {
+    let part = __s0_buffer_get(MirTypePartRec, store.type_parts, part_id - 1)
+    let frame = __s0_buffer_get(MirVFrameRec, scan.frames, frame_index - 1)
+    var at: U64 = 0
+    while at < frame.field_count {
+        let field = __s0_buffer_get(MirVFrameField, scan.fields, frame.field_start + at)
+        if field.ordinal == part.ordinal + 1 { return at + 1 }
+        at = at + 1
+    }
+    return 0
+}
+
+fn mir_vframe_field_kind_pos(scan: MirVFrameScan, frame_index: U64, pos: U64) -> U64 {
+    let frame = __s0_buffer_get(MirVFrameRec, scan.frames, frame_index - 1)
+    if pos == 0 || pos > frame.field_count { return 0 }
+    return __s0_buffer_get(MirVFrameField, scan.fields, frame.field_start + pos - 1).kind
+}
+
+fn mir_vframe_field_ordinal_pos(scan: MirVFrameScan, store: MirStore, frame_index: U64, pos: U64) -> U64 {
+    let frame = __s0_buffer_get(MirVFrameRec, scan.frames, frame_index - 1)
+    if pos == 0 || pos > frame.field_count { return 0 }
+    let field = __s0_buffer_get(MirVFrameField, scan.fields, frame.field_start + pos - 1)
+    return field.ordinal
+}
+
+fn mir_vframe_saved_pair_exists(scan: MirVFrameScan, frame_index: U64, run: MirVFrameRun, save_pos: __s0_Buffer(U64)) -> Bool {
+    let frame = __s0_buffer_get(MirVFrameRec, scan.frames, frame_index - 1)
+    var index: U64 = 0
+    while index < frame.field_count {
+        let cpos = mir_vframe_field_pos(scan, frame_index, mir_vframe_field_callee(), index)
+        if cpos != 0 { let ypos = mir_vframe_field_pos(scan, frame_index, mir_vframe_field_callee_owner(), index)
+            if mir_vframe_save_has(run, save_pos, cpos) && mir_vframe_save_has(run, save_pos, ypos) { return true } }
+        index = index + 1
+    }
+    return false
+}
+
+fn mir_vframe_sort_save_pos(scan: MirVFrameScan, store: MirStore, frame_index: U64, save_pos: __s0_Buffer(U64), start: U64, count: U64) -> Unit {
+    var i: U64 = 1
+    while i < count {
+        let value = __s0_buffer_get(U64, save_pos, start + i)
+        let ordinal = mir_vframe_field_ordinal_pos(scan, store, frame_index, value)
+        var j = i
+        var shifted = false
+        while j > 0 && !shifted {
+            let prior = __s0_buffer_get(U64, save_pos, start + j - 1)
+            if mir_vframe_field_ordinal_pos(scan, store, frame_index, prior) <= ordinal { shifted = true } else {
+                __s0_buffer_set(U64, save_pos, start + j, prior)
+                j = j - 1
+            }
+        }
+        __s0_buffer_set(U64, save_pos, start + j, value)
+        i = i + 1
+    }
+}
+
+fn mir_vframe_save_has(run: MirVFrameRun, save_pos: __s0_Buffer(U64), pos: U64) -> Bool {
+    var at = run.save_start
+    while at < run.save_start + run.save_count { if __s0_buffer_get(U64, save_pos, at) == pos { return true }
+        at = at + 1 }
+    return false
+}
+
+fn mir_vframe_state_ordinal(store: MirStore, indexes: MirVIndexes, state_type: U64, start: U64, end: U64) -> U64 {
+    let count = mir_vframe_state_variant_count(store, indexes, state_type)
+    var at: U64 = 0
+    while at < count {
+        let part = __s0_buffer_get(MirTypePartRec, store.type_parts, mir_vframe_variant(store, indexes, state_type, at) - 1)
+        if mir_vname_equal(store, part.name_start, part.name_end, start, end) { return at + 1 }
+        at = at + 1
+    }
+    return 0
+}
+
+fn mir_vframe_resume_index(store: MirStore, indexes: MirVIndexes, state_type: U64, ordinal: U64) -> U64 {
+    if ordinal == 0 { return 0 }
+    let part = __s0_buffer_get(MirTypePartRec, store.type_parts, mir_vframe_variant(store, indexes, state_type, ordinal - 1) - 1)
+    return mir_vframe_indexed(store, part.name_start, part.name_end, "resume")
+}
+
+fn mir_vframe_cleanup_index(store: MirStore, indexes: MirVIndexes, state_type: U64, ordinal: U64) -> U64 {
+    if ordinal == 0 { return 0 }
+    let part = __s0_buffer_get(MirTypePartRec, store.type_parts, mir_vframe_variant(store, indexes, state_type, ordinal - 1) - 1)
+    return mir_vframe_indexed(store, part.name_start, part.name_end, "cleanup")
+}
+
+fn mir_vframe_def_instr(store: MirStore, indexes: MirVIndexes, function: U64, value: U64) -> U64 {
+    let vi = mir_vindex_value(indexes, function, value)
+    if vi == 0 { return 0 }
+    let v = __s0_buffer_get(MirValueRec, store.values, vi - 1)
+    return mir_v6_instruction_for_value(store, indexes, v)
+}
+
+fn mir_vframe_status_ordinal(store: MirStore, indexes: MirVIndexes, function: U64, status_type: U64, value: U64) -> U64 {
+    let iid = mir_vframe_def_instr(store, indexes, function, value)
+    if iid == 0 { return 0 }
+    let x = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
+    if x.op != mir_op_enum_construct() || x.type_op != status_type { return 0 }
+    return mir_vframe_state_ordinal(store, indexes, status_type, x.name_start, x.name_end)
+}
+
+fn mir_vframe_state_store_variant(store: MirStore, indexes: MirVIndexes, function: U64, state_type: U64, value: U64) -> U64 {
+    let iid = mir_vframe_def_instr(store, indexes, function, value)
+    if iid == 0 { return 0 }
+    let x = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
+    if x.op != mir_op_enum_construct() || x.type_op != state_type { return 0 }
+    return mir_vframe_state_ordinal(store, indexes, state_type, x.name_start, x.name_end)
+}
+
+// Cancellation observation is the binding call resolved to the runtime's
+// alder_task_cancelled entry, never a user spelling.
+fn mir_vframe_cancel_cond(store: MirStore, indexes: MirVIndexes, function: U64, value: U64) -> Bool {
+    let iid = mir_vframe_def_instr(store, indexes, function, value)
+    if iid == 0 { return false }
+    let x = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
+    if x.op != mir_op_c_binding_call() || !mir_vid_valid(x.target, __s0_buffer_len(MirBindingFnRec, store.binding_funcs)) { return false }
+    let b = __s0_buffer_get(MirBindingFnRec, store.binding_funcs, x.target - 1)
+    return mir_vname_word(store, b.c_name_start, b.c_name_end, "alder_task_cancelled")
+}
+
+fn mir_vframe_pred_count(store: MirStore, indexes: MirVIndexes, function: U64, target: U64) -> U64 {
+    if target == 0 { return 0 }
+    var count: U64 = 0
+    let bcount = mir_vindex_block_count(indexes, function)
+    var block: U64 = 1
+    while block <= bcount {
+        let icount = mir_vindex_instr_count(indexes, function, block)
+        var ii: U64 = 0
+        while ii < icount { let x = __s0_buffer_get(MirInstrRec, store.instructions, mir_vindex_instr(indexes, function, block, ii) - 1)
+            if mir_vop_checked(x.op) && x.target == target { count = count + 1 }
+            ii = ii + 1 }
+        let term_id = mir_vindex_term(indexes, function, block)
+        if term_id != 0 { let t = __s0_buffer_get(MirTermRec, store.terminators, term_id - 1)
+            if t.kind == mir_term_jump() && t.target == target { count = count + 1 }
+            if t.kind == mir_term_branch() { if t.then_block == target { count = count + 1 }
+                if t.else_block == target { count = count + 1 } }
+            if t.kind == mir_term_switch() { let total = mir_vindex_op_term_count(indexes, term_id)
+                var oi: U64 = 0
+                while oi < total { let c = __s0_buffer_get(MirOperandRec, store.operands, mir_vindex_op_term(indexes, term_id, oi) - 1)
+                    if c.kind == mir_operand_switch_case() && c.target == target { count = count + 1 }
+                    oi = oi + 1 } } }
+        block = block + 1
+    }
+    return count
+}
+
+fn mir_vframe_edge(store: MirStore, indexes: MirVIndexes, function: U64, from: U64, to: U64) -> U64 {
+    // 0 none, 1 normal edge, 2 cancellation-true edge.
+    var cancel: U64 = 0
+    var normal: U64 = 0
+    let icount = mir_vindex_instr_count(indexes, function, from)
+    var ii: U64 = 0
+    while ii < icount { let x = __s0_buffer_get(MirInstrRec, store.instructions, mir_vindex_instr(indexes, function, from, ii) - 1)
+        if mir_vop_checked(x.op) && x.target == to { normal = 1 }
+        ii = ii + 1 }
+    let term_id = mir_vindex_term(indexes, function, from)
+    if term_id != 0 { let t = __s0_buffer_get(MirTermRec, store.terminators, term_id - 1)
+        if t.kind == mir_term_jump() && t.target == to { normal = 1 }
+        if t.kind == mir_term_branch() { if t.then_block == to { if mir_vframe_cancel_cond(store, indexes, function, t.value) { cancel = 1 } else { normal = 1 } }
+            if t.else_block == to { normal = 1 } }
+        if t.kind == mir_term_switch() { let total = mir_vindex_op_term_count(indexes, term_id)
+            var oi: U64 = 0
+            while oi < total { let c = __s0_buffer_get(MirOperandRec, store.operands, mir_vindex_op_term(indexes, term_id, oi) - 1)
+                if c.kind == mir_operand_switch_case() && c.target == to { normal = 1 }
+                oi = oi + 1 } } }
+    if cancel != 0 { return 2 }
+    if normal != 0 { return 1 }
+    return 0
+}
+
+type MirVFrameRun {
+    suspend_block: U64
+    save_start: U64
+    save_count: U64
+}
+
+fn mir_vframe_state_target(store: MirStore, indexes: MirVIndexes, function: U64, state_type: U64, term_id: U64, variant: U64) -> U64 {
+    if term_id == 0 { return 0 }
+    let total = mir_vindex_op_term_count(indexes, term_id)
+    var oi: U64 = 0
+    while oi < total { let c = __s0_buffer_get(MirOperandRec, store.operands, mir_vindex_op_term(indexes, term_id, oi) - 1)
+        if c.kind == mir_operand_switch_case() && mir_vframe_state_ordinal(store, indexes, state_type, c.name_start, c.name_end) == variant { return c.target }
+        oi = oi + 1 }
+    return 0
+}
+
+fn mir_vframe_reach_has(reach: __s0_Buffer(U64), block: U64) -> Bool {
+    var at: U64 = 0
+    while at < __s0_buffer_len(U64, reach) { if __s0_buffer_get(U64, reach, at) == block { return true }
+        at = at + 1 }
+    return false
+}
+
+fn mir_vframe_bit(value: U64, bit: U64) -> Bool { return (value / mir_vframe_pow2(bit)) % 2 == 1 }
+
+fn mir_vframe_set_bit(value: U64, bit: U64) -> U64 { if mir_vframe_bit(value, bit) { return value }
+    return value + mir_vframe_pow2(bit) }
+
+fn mir_vframe_and(a: U64, b: U64) -> U64 {
+    var result: U64 = 0
+    var bit: U64 = 0
+    while bit < 64 { if mir_vframe_bit(a, bit) && mir_vframe_bit(b, bit) { result = mir_vframe_set_bit(result, bit) }
+        bit = bit + 1 }
+    return result
+}
+
+fn mir_vframe_or(a: U64, b: U64) -> U64 {
+    var result = a
+    var bit: U64 = 0
+    while bit < 64 { if mir_vframe_bit(b, bit) { result = mir_vframe_set_bit(result, bit) }
+        bit = bit + 1 }
+    return result
+}
+
+fn mir_vframe_pow2(bit: U64) -> U64 { var v: U64 = 1
+var at: U64 = 0
+while at < bit { v = v * 2
+at = at + 1 }
+return v }
+
+// Phase 6 frame checks: canonical dispatch, one suspend block per state,
+// ordered save lists, exact resume load lists, and the status contract.
+fn mir_vframe_phase6(d: Domain, store: MirStore, indexes: MirVIndexes, out0: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+    var out = out0
+    let scanned = try mir_vframe_scan(d, store, indexes)
+    let scan = scanned.scan
+    if !scan.reserved { return Ok(out) }
+    var si: U64 = 1
+    while si <= __s0_buffer_len(MirVFrameStep, scan.steps) {
+        let step = __s0_buffer_get(MirVFrameStep, scan.steps, si - 1)
+        let function = step.function
+        let frame_index = mir_vframe_frame_index(scan, step.frame_type)
+        let frame = __s0_buffer_get(MirVFrameRec, scan.frames, frame_index - 1)
+        let bcount = mir_vindex_block_count(indexes, function)
+        let vc = mir_vframe_state_variant_count(store, indexes, step.state_type)
+        // Dispatch block.
+        var dispatch_ok = true
+        if bcount < 1 || mir_vindex_instr_count(indexes, function, 1) != 1 { dispatch_ok = false }
+        var state_load: U64 = 0
+        if dispatch_ok { let x = __s0_buffer_get(MirInstrRec, store.instructions, mir_vindex_instr(indexes, function, 1, 0) - 1)
+            if x.op != mir_op_load() { dispatch_ok = false } else {
+                let part = mir_vframe_field_part_of(store, indexes, function, x.place, step.frame_param)
+                if !mir_vframe_field_part_word(store, part, "state") { dispatch_ok = false }
+                state_load = x.result } }
+        var term_id: U64 = 0
+        if dispatch_ok { term_id = mir_vindex_term(indexes, function, 1)
+            if term_id == 0 { dispatch_ok = false } else { let t = __s0_buffer_get(MirTermRec, store.terminators, term_id - 1)
+                if t.kind != mir_term_switch() || t.value != state_load { dispatch_ok = false } } }
+        // Dispatch case targets, one per state variant, no default.
+        var target_count: U64 = 0
+        if dispatch_ok { let t = __s0_buffer_get(MirTermRec, store.terminators, term_id - 1)
+            let total = mir_vindex_op_term_count(indexes, term_id)
+            var oi: U64 = 0
+            while oi < total { let c = __s0_buffer_get(MirOperandRec, store.operands, mir_vindex_op_term(indexes, term_id, oi) - 1)
+                if c.kind == mir_operand_switch_case() { target_count = target_count + 1
+                    if mir_vframe_state_ordinal(store, indexes, step.state_type, c.name_start, c.name_end) == 0 { dispatch_ok = false }
+                    if c.target < 1 || c.target > bcount { dispatch_ok = false }
+                }
+                oi = oi + 1 }
+            if target_count != vc { dispatch_ok = false }
+        }
+        if !dispatch_ok { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), mir_vdiag_frame_dispatch(), function, 1, 0, 0, 0, 0, function, 0, 0, 0)) }
+        // Each state target has exactly one predecessor: the dispatch block.
+        if dispatch_ok { let t = __s0_buffer_get(MirTermRec, store.terminators, term_id - 1)
+            let total = mir_vindex_op_term_count(indexes, term_id)
+            var oi: U64 = 0
+            while oi < total { let c = __s0_buffer_get(MirOperandRec, store.operands, mir_vindex_op_term(indexes, term_id, oi) - 1)
+                if c.kind == mir_operand_switch_case() { if mir_vframe_pred_count(store, indexes, function, c.target) != 1 { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), mir_vdiag_frame_dispatch(), function, c.target, 0, 0, 0, 0, function, 0, 0, 0)) } else { if mir_vframe_edge(store, indexes, function, 1, c.target) == 0 { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), mir_vdiag_frame_dispatch(), function, c.target, 0, 0, 0, 0, function, 0, 0, 0)) } } }
+                oi = oi + 1 } }
+        // Save lists.
+        var runs = try __s0_buffer_new(MirVFrameRun, d)
+        var r: U64 = 0
+        while r < vc { runs = try __s0_buffer_append(MirVFrameRun, d, runs, MirVFrameRun(suspend_block: 0, save_start: 0, save_count: 0))
+            r = r + 1 }
+        var save_pos = try __s0_buffer_new(U64, d)
+        var block: U64 = 2
+        while block <= bcount {
+            let icount = mir_vindex_instr_count(indexes, function, block)
+            var state_iid: U64 = 0
+            var state_ordinal: U64 = 0
+            var state_variant: U64 = 0
+            var ii: U64 = 0
+            while ii < icount { let iid = mir_vindex_instr(indexes, function, block, ii)
+                let x = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
+                if x.op == mir_op_store() && mir_vframe_field_part_word(store, mir_vframe_field_part_of(store, indexes, function, x.place, step.frame_param), "state") {
+                    if state_iid != 0 { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), mir_vdiag_frame_save_order(), function, block, iid, 0, x.place, 0, function, 0, 0, 0)) } else {
+                        state_iid = iid
+                        state_ordinal = ii + 1
+                        state_variant = mir_vframe_state_store_variant(store, indexes, function, step.state_type, x.a)
+                    }
+                }
+                ii = ii + 1 }
+            if state_iid != 0 {
+                if state_variant == 0 || state_variant == 1 { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), mir_vdiag_frame_save_order(), function, block, state_iid, 0, 0, 0, function, 0, 0, state_variant)) } else {
+                    var run = __s0_buffer_get(MirVFrameRun, runs, state_variant - 1)
+                    if run.suspend_block != 0 { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), mir_vdiag_frame_suspend_dup(), function, block, state_iid, 0, 0, 0, function, 0, 0, state_variant)) } else {
+                        run.suspend_block = block
+                        run.save_start = __s0_buffer_len(U64, save_pos)
+                        var last_ordinal: U64 = 0
+                        var bad = false
+                        var ord: U64 = state_ordinal
+                        while ord < icount { let oiid = mir_vindex_instr(indexes, function, block, ord)
+                            let o = __s0_buffer_get(MirInstrRec, store.instructions, oiid - 1)
+                            if o.op == mir_op_store() { let part = mir_vframe_field_part_of(store, indexes, function, o.place, step.frame_param)
+                                if part != 0 { let pos = mir_vframe_field_pos_part(scan, store, frame_index, part)
+                                    let kind = mir_vframe_field_kind_pos(scan, frame_index, pos)
+                                    let savable = kind == mir_vframe_field_callee() || kind == mir_vframe_field_callee_owner() || kind == mir_vframe_field_domain() || kind == mir_vframe_field_local() || kind == mir_vframe_field_temp() || kind == mir_vframe_field_cleanup() || kind == mir_vframe_field_scope()
+                                    if !savable { bad = true } else { let part_rec = __s0_buffer_get(MirTypePartRec, store.type_parts, part - 1)
+                                        if kind != mir_vframe_field_scope() { if part_rec.ordinal <= last_ordinal { bad = true }
+                                            last_ordinal = part_rec.ordinal }
+                                        save_pos = try __s0_buffer_append(U64, d, save_pos, pos) } } }
+                            ord = ord + 1 }
+                        mir_vframe_sort_save_pos(scan, store, frame_index, save_pos, run.save_start, __s0_buffer_len(U64, save_pos) - run.save_start)
+                        if bad { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), mir_vdiag_frame_save_order(), function, block, state_iid, 0, 0, 0, function, 0, 0, state_variant)) }
+                        run.save_count = __s0_buffer_len(U64, save_pos) - run.save_start
+                        __s0_buffer_set(MirVFrameRun, runs, state_variant - 1, run)
+                        // A suspend block returns call or park.
+                        let sterm = mir_vindex_term(indexes, function, block)
+                        var suspend_ok = false
+                        if sterm != 0 { let t = __s0_buffer_get(MirTermRec, store.terminators, sterm - 1)
+                            if t.kind == mir_term_return() { let status = mir_vframe_status_ordinal(store, indexes, function, scan.status_type, t.value)
+                                if status == 2 || status == 3 { suspend_ok = true } } }
+                        if !suspend_ok { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), mir_vdiag_frame_save_order(), function, block, 0, sterm, 0, 0, function, 0, 0, state_variant)) }
+                    }
+                }
+            }
+            block = block + 1
+        }
+        // Every non-entry state has one suspend block, and its resume block
+        // loads exactly the saved fields in frame order.
+        var variant: U64 = 2
+        while variant <= vc {
+            let run = __s0_buffer_get(MirVFrameRun, runs, variant - 1)
+            if run.suspend_block == 0 { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), mir_vdiag_frame_suspend_dup(), function, 1, 0, 0, 0, 0, function, 0, 0, variant)) } else {
+                // Find the dispatch target for this variant.
+                var target: U64 = 0
+                if dispatch_ok { let t = __s0_buffer_get(MirTermRec, store.terminators, term_id - 1)
+                    let total = mir_vindex_op_term_count(indexes, term_id)
+                    var oi: U64 = 0
+                    while oi < total { let c = __s0_buffer_get(MirOperandRec, store.operands, mir_vindex_op_term(indexes, term_id, oi) - 1)
+                        if c.kind == mir_operand_switch_case() && mir_vframe_state_ordinal(store, indexes, step.state_type, c.name_start, c.name_end) == variant { target = c.target }
+                        oi = oi + 1 } }
+                if target != 0 {
+                    var loads = try __s0_buffer_new(U64, d)
+                    var visited = try __s0_buffer_new(U64, d)
+                    var vi: U64 = 0
+                    while vi <= bcount { visited = try __s0_buffer_append(U64, d, visited, 0)
+                        vi = vi + 1 }
+                    var current = target
+                    var steps: U64 = 0
+                    while current != 0 && current <= bcount && steps <= bcount {
+                        __s0_buffer_set(U64, visited, current, 1)
+                        let lcount = mir_vindex_instr_count(indexes, function, current)
+                        var li: U64 = 0
+                        while li < lcount { let x = __s0_buffer_get(MirInstrRec, store.instructions, mir_vindex_instr(indexes, function, current, li) - 1)
+                            if x.op == mir_op_load() { let part = mir_vframe_field_part_of(store, indexes, function, x.place, step.frame_param)
+                                if part != 0 { let pos = mir_vframe_field_pos_part(scan, store, frame_index, part)
+                                    let kind = mir_vframe_field_kind_pos(scan, frame_index, pos)
+                                    if kind == mir_vframe_field_callee() || kind == mir_vframe_field_callee_owner() || kind == mir_vframe_field_domain() || kind == mir_vframe_field_local() || kind == mir_vframe_field_temp() || kind == mir_vframe_field_cleanup() || kind == mir_vframe_field_scope() { loads = try __s0_buffer_append(U64, d, loads, pos) } } }
+                            li = li + 1 }
+                        let t = mir_vindex_term(indexes, function, current)
+                        var next: U64 = 0
+                        if t != 0 { let term = __s0_buffer_get(MirTermRec, store.terminators, t - 1)
+                            if term.kind == mir_term_jump() { next = term.target } else { if term.kind == mir_term_branch() && mir_vframe_cancel_cond(store, indexes, function, term.value) { next = term.else_block } } }
+                        if next == 0 || __s0_buffer_get(U64, visited, next) != 0 || mir_vframe_pred_count(store, indexes, function, next) != 1 { current = 0 } else { current = next }
+                        steps = steps + 1
+                    }
+                    var same = __s0_buffer_len(U64, loads) == run.save_count
+                    if same { var li2: U64 = 0
+                        while li2 < run.save_count { if __s0_buffer_get(U64, loads, li2) != __s0_buffer_get(U64, save_pos, run.save_start + li2) { same = false }
+                            li2 = li2 + 1 } }
+                    if !same { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), mir_vdiag_frame_load_set(), function, target, 0, 0, 0, 0, function, 0, 0, variant)) }
+                }
+            }
+            variant = variant + 1
+        }
+        // State and out dataflow, then one diagnostic per failing return.
+        let fc = frame.field_count
+        let words = (fc + 63) / 64
+        var must = try __s0_buffer_new(U64, d)
+        var out_must = try __s0_buffer_new(U64, d)
+        var out_may = try __s0_buffer_new(U64, d)
+        var cur_state = try __s0_buffer_new(U64, d)
+        var seeded = try __s0_buffer_new(U64, d)
+        var queued = try __s0_buffer_new(U64, d)
+        var slot: U64 = 0
+        while slot < (bcount + 1) * words { must = try __s0_buffer_append(U64, d, must, 0)
+            slot = slot + 1 }
+        slot = 0
+        while slot <= bcount { out_must = try __s0_buffer_append(U64, d, out_must, 0)
+            out_may = try __s0_buffer_append(U64, d, out_may, 0)
+            cur_state = try __s0_buffer_append(U64, d, cur_state, 0)
+            seeded = try __s0_buffer_append(U64, d, seeded, 0)
+            queued = try __s0_buffer_append(U64, d, queued, 0)
+            slot = slot + 1 }
+        var queue = try __s0_buffer_new(U64, d)
+        // Seed the dispatch block with the caller-initialized p/o/state fields.
+        let p_pos = mir_vframe_field_pos(scan, frame_index, mir_vframe_field_param(), 0)
+        let o_pos = mir_vframe_field_pos(scan, frame_index, mir_vframe_field_owner(), 0)
+        let s_pos = mir_vframe_field_pos(scan, frame_index, mir_vframe_field_state(), 0)
+        let out_pos = mir_vframe_field_pos(scan, frame_index, mir_vframe_field_out(), 0)
+        var base_word: U64 = 0
+        if p_pos != 0 { base_word = mir_vframe_set_bit(base_word, (p_pos - 1) % 64) }
+        if o_pos != 0 { base_word = mir_vframe_set_bit(base_word, (o_pos - 1) % 64) }
+        if s_pos != 0 { base_word = mir_vframe_set_bit(base_word, (s_pos - 1) % 64) }
+        __s0_buffer_set(U64, must, words, base_word)
+        __s0_buffer_set(U64, seeded, 0, 1)
+        __s0_buffer_set(U64, queued, 0, 1)
+        queue = try __s0_buffer_append(U64, d, queue, 1)
+        // Seed the entry target and every resume target.
+        if dispatch_ok { let t = __s0_buffer_get(MirTermRec, store.terminators, term_id - 1)
+            let total = mir_vindex_op_term_count(indexes, term_id)
+            var oi: U64 = 0
+            while oi < total { let c = __s0_buffer_get(MirOperandRec, store.operands, mir_vindex_op_term(indexes, term_id, oi) - 1)
+                if c.kind == mir_operand_switch_case() { let ord = mir_vframe_state_ordinal(store, indexes, step.state_type, c.name_start, c.name_end)
+                    if ord == 1 && c.target >= 1 && c.target <= bcount { __s0_buffer_set(U64, must, c.target * words, base_word)
+                        __s0_buffer_set(U64, cur_state, c.target, ord)
+                        __s0_buffer_set(U64, seeded, c.target, 1)
+                        if __s0_buffer_get(U64, queued, c.target) == 0 { __s0_buffer_set(U64, queued, c.target, 1)
+                            queue = try __s0_buffer_append(U64, d, queue, c.target) } } }
+                oi = oi + 1 } }
+        // Seed every resume root with its saved fields before the worklist.
+        var sv2: U64 = 2
+        while sv2 <= vc {
+            let run = __s0_buffer_get(MirVFrameRun, runs, sv2 - 1)
+            let target = mir_vframe_state_target(store, indexes, function, step.state_type, term_id, sv2)
+            if target != 0 && run.suspend_block != 0 {
+                var sw2: U64 = 0
+                while sw2 < words { var value: U64 = 0
+                    if sw2 == 0 { value = base_word }
+                    var sc2: U64 = 0
+                    while sc2 < run.save_count { let pos3 = __s0_buffer_get(U64, save_pos, run.save_start + sc2)
+                        if (pos3 - 1) / 64 == sw2 { value = mir_vframe_set_bit(value, (pos3 - 1) % 64) }
+                        sc2 = sc2 + 1 }
+                    __s0_buffer_set(U64, must, target * words + sw2, value)
+                    sw2 = sw2 + 1 }
+                __s0_buffer_set(U64, cur_state, target, sv2)
+                __s0_buffer_set(U64, seeded, target, 1)
+                if __s0_buffer_get(U64, queued, target) == 0 { __s0_buffer_set(U64, queued, target, 1)
+                    queue = try __s0_buffer_append(U64, d, queue, target) }
+            }
+            sv2 = sv2 + 1
+        }
+        var q: U64 = 0
+        while q < __s0_buffer_len(U64, queue) {
+            let bi = __s0_buffer_get(U64, queue, q)
+            __s0_buffer_set(U64, queued, bi, 0)
+            q = q + 1
+            if bi >= 1 && bi <= bcount {
+                // Copy the block's facts.
+                var tmp = try __s0_buffer_new(U64, d)
+                var w: U64 = 0
+                while w < words { tmp = try __s0_buffer_append(U64, d, tmp, __s0_buffer_get(U64, must, bi * words + w))
+                    w = w + 1 }
+                var st = __s0_buffer_get(U64, cur_state, bi)
+                var omust = __s0_buffer_get(U64, out_must, bi)
+                var omay = __s0_buffer_get(U64, out_may, bi)
+                let icount = mir_vindex_instr_count(indexes, function, bi)
+                var ii: U64 = 0
+                while ii < icount { let x = __s0_buffer_get(MirInstrRec, store.instructions, mir_vindex_instr(indexes, function, bi, ii) - 1)
+                    if x.op == mir_op_store() { let part = mir_vframe_field_part_of(store, indexes, function, x.place, step.frame_param)
+                        if part != 0 { let pos = mir_vframe_field_pos_part(scan, store, frame_index, part)
+                            if pos != 0 { let word = (pos - 1) / 64
+                                let bit = (pos - 1) % 64
+                                __s0_buffer_set(U64, tmp, word, mir_vframe_set_bit(__s0_buffer_get(U64, tmp, word), bit)) }
+                            if pos == out_pos { omust = 1
+                                omay = 1 }
+                            let sv = mir_vframe_state_store_variant(store, indexes, function, step.state_type, x.a)
+                            if sv != 0 { st = sv } } }
+                    ii = ii + 1 }
+                // Refresh the resume root from this suspend block.
+                var variant2: U64 = 2
+                while variant2 <= vc {
+                    let run = __s0_buffer_get(MirVFrameRun, runs, variant2 - 1)
+                    if run.suspend_block == bi { let target = mir_vframe_state_target(store, indexes, function, step.state_type, term_id, variant2)
+                        if target != 0 {
+                            var sw: U64 = 0
+                            while sw < words { var value = base_word
+                                if sw == 0 { value = base_word } else { value = 0 }
+                                // Save fields are spread across words.
+                                var sc: U64 = 0
+                                while sc < run.save_count { let pos2 = __s0_buffer_get(U64, save_pos, run.save_start + sc)
+                                    if (pos2 - 1) / 64 == sw { value = mir_vframe_set_bit(value, (pos2 - 1) % 64) }
+                                    sc = sc + 1 }
+                                if sw == (out_pos - 1) / 64 { if omust != 0 { value = mir_vframe_set_bit(value, (out_pos - 1) % 64) } }
+                                __s0_buffer_set(U64, must, target * words + sw, value)
+                                sw = sw + 1 }
+                            __s0_buffer_set(U64, cur_state, target, variant2)
+                            __s0_buffer_set(U64, out_must, target, omust)
+                            __s0_buffer_set(U64, out_may, target, omay)
+                            if __s0_buffer_get(U64, queued, target) == 0 { __s0_buffer_set(U64, queued, target, 1)
+                                queue = try __s0_buffer_append(U64, d, queue, target) }
+                        }
+                    }
+                    variant2 = variant2 + 1
+                }
+                // Propagate to successors.
+                let t = mir_vindex_term(indexes, function, bi)
+                var targets = try __s0_buffer_new(U64, d)
+                if t != 0 { let term = __s0_buffer_get(MirTermRec, store.terminators, t - 1)
+                    if term.kind == mir_term_jump() { targets = try __s0_buffer_append(U64, d, targets, term.target) }
+                    if term.kind == mir_term_branch() { targets = try __s0_buffer_append(U64, d, targets, term.then_block)
+                        targets = try __s0_buffer_append(U64, d, targets, term.else_block) }
+                    if term.kind == mir_term_switch() { let total = mir_vindex_op_term_count(indexes, t)
+                        var oi: U64 = 0
+                        while oi < total { let c = __s0_buffer_get(MirOperandRec, store.operands, mir_vindex_op_term(indexes, t, oi) - 1)
+                            if c.kind == mir_operand_switch_case() && (bi != 1 || mir_vframe_state_ordinal(store, indexes, step.state_type, c.name_start, c.name_end) == 1) { targets = try __s0_buffer_append(U64, d, targets, c.target) }
+                            oi = oi + 1 } } }
+                var ti: U64 = 0
+                while ti < __s0_buffer_len(U64, targets) { let target = __s0_buffer_get(U64, targets, ti)
+                    ti = ti + 1
+                    if target >= 1 && target <= bcount && target != 1 {
+                        var changed = false
+                        if __s0_buffer_get(U64, seeded, target) == 0 { __s0_buffer_set(U64, seeded, target, 1)
+                            var w2: U64 = 0
+                            while w2 < words { __s0_buffer_set(U64, must, target * words + w2, __s0_buffer_get(U64, tmp, w2))
+                                w2 = w2 + 1 }
+                            __s0_buffer_set(U64, cur_state, target, st)
+                            __s0_buffer_set(U64, out_must, target, omust)
+                            __s0_buffer_set(U64, out_may, target, omay)
+                            changed = true
+                        } else {
+                            if __s0_buffer_get(U64, cur_state, target) != st && __s0_buffer_get(U64, cur_state, target) != 0 { __s0_buffer_set(U64, cur_state, target, 0)
+                                changed = true }
+                            var w2: U64 = 0
+                            while w2 < words { let old = __s0_buffer_get(U64, must, target * words + w2)
+                                let incoming = __s0_buffer_get(U64, tmp, w2)
+                                let merged = mir_vframe_and(old, incoming)
+                                if merged != old { __s0_buffer_set(U64, must, target * words + w2, merged)
+                                    changed = true }
+                                w2 = w2 + 1 }
+                            let old_must = __s0_buffer_get(U64, out_must, target)
+                            let new_must = mir_vframe_and(old_must, omust)
+                            if new_must != old_must { __s0_buffer_set(U64, out_must, target, new_must)
+                                changed = true }
+                            let old_may = __s0_buffer_get(U64, out_may, target)
+                            let new_may = mir_vframe_or(old_may, omay)
+                            if new_may != old_may { __s0_buffer_set(U64, out_may, target, new_may)
+                                changed = true }
+                        }
+                        if changed { if __s0_buffer_get(U64, queued, target) == 0 { __s0_buffer_set(U64, queued, target, 1)
+                                queue = try __s0_buffer_append(U64, d, queue, target) } }
+                    }
+                }
+            }
+        }
+        // Frame allocations: child of the activation domain, stored once in
+        // the allocating step's own x<i>.
+        var ab: U64 = 1
+        while ab <= bcount {
+            let acount = mir_vindex_instr_count(indexes, function, ab)
+            var ai: U64 = 0
+            while ai < acount { let aid = mir_vindex_instr(indexes, function, ab, ai)
+                let alloc = __s0_buffer_get(MirInstrRec, store.instructions, aid - 1)
+                if (alloc.op == mir_op_alloc() || alloc.op == mir_op_alloc_checked()) && mir_vframe_is_frame(scan, alloc.type_op) {
+                    let dom_id = mir_vframe_def_instr(store, indexes, function, alloc.a)
+                    var dom_ok = false
+                    if dom_id != 0 { let dom = __s0_buffer_get(MirInstrRec, store.instructions, dom_id - 1)
+                        if dom.op == mir_op_domain_create() && dom.a == step.owner_param { dom_ok = true } }
+                    if !dom_ok { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), mir_vdiag_frame_alloc_site(), function, ab, aid, 0, 0, alloc.type_op, function, 0, 0, alloc.type_op)) }
+                    var stores: U64 = 0
+                    var valid_target = false
+                    var sb: U64 = 1
+                    while sb <= bcount { let scount = mir_vindex_instr_count(indexes, function, sb)
+                        var sj: U64 = 0
+                        while sj < scount { let st = __s0_buffer_get(MirInstrRec, store.instructions, mir_vindex_instr(indexes, function, sb, sj) - 1)
+                            if st.op == mir_op_store() && st.a == alloc.result { stores = stores + 1
+                                let part = mir_vframe_field_part_of(store, indexes, function, st.place, step.frame_param)
+                                if part != 0 { let rec = __s0_buffer_get(MirTypePartRec, store.type_parts, part - 1)
+                                    if mir_vframe_indexed(store, rec.name_start, rec.name_end, "x") != 0 { valid_target = true } } }
+                            sj = sj + 1 }
+                        sb = sb + 1 }
+                    if stores != 1 || !valid_target { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), mir_vdiag_frame_alloc_use(), function, ab, aid, 0, 0, alloc.type_op, function, 0, 0, alloc.result)) }
+                }
+                ai = ai + 1 }
+            ab = ab + 1
+        }
+        // Emit return and uninitialized-load diagnostics in block order.
+        var reach = try mir_vreachable(d, store, indexes, function)
+        var teardown = try __s0_buffer_new(U64, d)
+        var bi: U64 = 0
+        while bi <= bcount { teardown = try __s0_buffer_append(U64, d, teardown, 1)
+            bi = bi + 1 }
+        __s0_buffer_set(U64, teardown, 0, 0)
+        var changed2 = true
+        while changed2 { changed2 = false
+            bi = 2
+            while bi <= bcount { var val: U64 = 0
+                var pred: U64 = 1
+                while pred <= bcount { let edge = mir_vframe_edge(store, indexes, function, pred, bi)
+                    if edge == 2 { val = 1 } else { if edge == 1 && __s0_buffer_get(U64, teardown, pred) != 0 { val = 1 } }
+                    pred = pred + 1 }
+                if __s0_buffer_get(U64, teardown, bi) != val { __s0_buffer_set(U64, teardown, bi, val)
+                    changed2 = true }
+                bi = bi + 1 }
+        }
+        bi = 1
+        while bi <= bcount {
+            if mir_vframe_reach_has(reach, bi) {
+                // Replay the block's stores for the check pass.
+                var st = __s0_buffer_get(U64, cur_state, bi)
+                var omust = __s0_buffer_get(U64, out_must, bi)
+                var omay = __s0_buffer_get(U64, out_may, bi)
+                let icount = mir_vindex_instr_count(indexes, function, bi)
+                var ii: U64 = 0
+                while ii < icount { let iid = mir_vindex_instr(indexes, function, bi, ii)
+                    let x = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
+                    if x.op == mir_op_load() { let part = mir_vframe_field_part_of(store, indexes, function, x.place, step.frame_param)
+                        if part != 0 { let pos = mir_vframe_field_pos_part(scan, store, frame_index, part)
+                            var initialized = pos == p_pos || pos == o_pos || pos == s_pos
+                            if !initialized && (pos - 1) / 64 < words { if mir_vframe_bit(__s0_buffer_get(U64, must, bi * words + (pos - 1) / 64), (pos - 1) % 64) { initialized = true } }
+                            if !initialized { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), mir_vdiag_frame_uninit_load(), function, bi, iid, 0, x.place, 0, function, 0, 0, pos)) } } }
+                    if x.op == mir_op_store() { let part = mir_vframe_field_part_of(store, indexes, function, x.place, step.frame_param)
+                        if part != 0 { let pos = mir_vframe_field_pos_part(scan, store, frame_index, part)
+                            if pos == out_pos { omust = 1
+                                omay = 1 }
+                            let sv = mir_vframe_state_store_variant(store, indexes, function, step.state_type, x.a)
+                            if sv != 0 { st = sv } } }
+                    ii = ii + 1 }
+                let t = mir_vindex_term(indexes, function, bi)
+                if t != 0 { let term = __s0_buffer_get(MirTermRec, store.terminators, t - 1)
+                    if term.kind == mir_term_return() && term.value != 0 { let status = mir_vframe_status_ordinal(store, indexes, function, scan.status_type, term.value)
+                        if status == 0 { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), mir_vdiag_frame_status_done(), function, bi, 0, t, 0, 0, function, 0, 0, 0)) } else {
+                            if status == 1 { if out_pos == 0 || omust == 0 { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), mir_vdiag_frame_status_done(), function, bi, 0, t, 0, 0, function, 0, 0, 0)) } }
+                            if status == 2 || status == 3 {
+                                let idx = mir_vframe_resume_index(store, indexes, step.state_type, st)
+                                let run = __s0_buffer_get(MirVFrameRun, runs, st - 1)
+                                if idx != 0 {
+                                    let has_callee = mir_vframe_field_pos(scan, frame_index, mir_vframe_field_callee(), idx - 1) != 0
+                                    let cpos = mir_vframe_field_pos(scan, frame_index, mir_vframe_field_callee(), idx - 1)
+                                    let ypos = mir_vframe_field_pos(scan, frame_index, mir_vframe_field_callee_owner(), idx - 1)
+                                    let saved = mir_vframe_save_has(run, save_pos, cpos) && mir_vframe_save_has(run, save_pos, ypos)
+                                    if status == 2 { if !has_callee || !saved { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), mir_vdiag_frame_status_call(), function, bi, 0, t, 0, 0, function, 0, 0, idx)) } }
+                                    if status == 3 { if has_callee { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), mir_vdiag_frame_status_park(), function, bi, 0, t, 0, 0, function, 0, 0, idx)) } }
+                                } else {
+                                    let cidx = mir_vframe_cleanup_index(store, indexes, step.state_type, st)
+                                    if cidx == 0 { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), mir_vdiag_frame_status_call(), function, bi, 0, t, 0, 0, function, 0, 0, 0)) } else {
+                                        let pair = mir_vframe_saved_pair_exists(scan, frame_index, run, save_pos)
+                                        if status == 2 { if !pair { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), mir_vdiag_frame_status_call(), function, bi, 0, t, 0, 0, function, 0, 0, cidx)) } }
+                                        if status == 3 { if pair { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), mir_vdiag_frame_status_park(), function, bi, 0, t, 0, 0, function, 0, 0, cidx)) } }
+                                    }
+                                }
+                            }
+                            if status == 4 { if omay != 0 || __s0_buffer_get(U64, teardown, bi) == 0 { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), mir_vdiag_frame_status_cancelled(), function, bi, 0, t, 0, 0, function, 0, 0, 0)) } }
+                        }
+                    } }
+            }
+            bi = bi + 1
+        }
+        si = si + 1
+    }
+    return Ok(out)
+}
+
+// A frame field place is a direct field on a safe_mut view of a reserved frame
+// aggregate. Phase 1 and the Phase 6 store exemption use this name-only form.
+fn mir_vframe_place_frame_field(store: MirStore, indexes: MirVIndexes, function: U64, place: U64) -> Bool {
+    if place == 0 { return false }
+    let rec = __s0_buffer_get(MirPlaceRec, store.places, place - 1)
+    if rec.kind != mir_place_field() { return false }
+    let base = __s0_buffer_get(MirPlaceRec, store.places, rec.base - 1)
+    if base.kind != mir_place_deref() { return false }
+    let view_type = mir_v5_value_type(store, indexes, function, base.deref_value)
+    if !mir_vframe_type_kind_is(store, view_type, mir_type_kind_safe_mut()) { return false }
+    let elem = __s0_buffer_get(MirTypeRec, store.types, view_type - 1).elem
+    if !mir_vframe_type_kind_is(store, elem, mir_type_kind_aggregate()) { return false }
+    let t = __s0_buffer_get(MirTypeRec, store.types, elem - 1)
+    return mir_vframe_prefix(store, t.name_start, t.name_end, mir_vframe_type_prefix())
+}
+
+fn mir_vframe_status_type(store: MirStore) -> U64 {
+    var at: U64 = 1
+    while at <= __s0_buffer_len(MirTypeRec, store.types) { let t = __s0_buffer_get(MirTypeRec, store.types, at - 1)
+        if t.kind == mir_type_kind_enum() && mir_vname_word(store, t.name_start, t.name_end, mir_vframe_status_name()) { return at }
+        at = at + 1 }
+    return 0
+}
+
+fn mir_vframe_function_is_step(store: MirStore, function: U64) -> Bool {
+    if !mir_vid_valid(function, __s0_buffer_len(MirFunctionRec, store.functions)) { return false }
+    let f = __s0_buffer_get(MirFunctionRec, store.functions, function - 1)
+    return mir_vframe_prefix(store, f.name_start, f.name_end, mir_vframe_run_prefix())
+}
+
+type MirVFrameAnchor {
+    pos: U64
+    block: U64
+    instruction: U64
+}
+
+fn mir_vframe_zero_anchor() -> MirVFrameAnchor {
+    return MirVFrameAnchor(pos: 0, block: 0, instruction: 0)
+}
+
+// The adopting begin must store its result exactly once into a frame s<i>
+// field. All emissions storing the same field are one dynamic scope.
+fn mir_vframe_begin_anchor(store: MirStore, indexes: MirVIndexes, function: U64, scan: MirVFrameScan, frame_index: U64, frame_param: U64, begin: U64) -> MirVFrameAnchor {
+    var result = mir_vframe_zero_anchor()
+    var count: U64 = 0
+    let bcount = mir_vindex_block_count(indexes, function)
+    var block: U64 = 1
+    while block <= bcount {
+        let icount = mir_vindex_instr_count(indexes, function, block)
+        var ii: U64 = 0
+        while ii < icount {
+            let iid = mir_vindex_instr(indexes, function, block, ii)
+            let x = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
+            if x.op == mir_op_store() && x.a == begin {
+                let part = mir_vframe_field_part_of(store, indexes, function, x.place, frame_param)
+                if part != 0 {
+                    let pos = mir_vframe_field_pos_part(scan, store, frame_index, part)
+                    if mir_vframe_field_kind_pos(scan, frame_index, pos) == mir_vframe_field_scope() {
+                        count = count + 1
+                        result = MirVFrameAnchor(pos: pos, block: block, instruction: iid)
+                    }
+                }
+            }
+            ii = ii + 1
+        }
+        block = block + 1
+    }
+    if count == 1 { return result }
+    return mir_vframe_zero_anchor()
+}
+
+fn mir_vframe_begin_has_scope_store(store: MirStore, indexes: MirVIndexes, function: U64, scan: MirVFrameScan, frame_index: U64, frame_param: U64, begin: U64) -> Bool {
+    let bcount = mir_vindex_block_count(indexes, function)
+    var block: U64 = 1
+    while block <= bcount {
+        let icount = mir_vindex_instr_count(indexes, function, block)
+        var ii: U64 = 0
+        while ii < icount {
+            let x = __s0_buffer_get(MirInstrRec, store.instructions, mir_vindex_instr(indexes, function, block, ii) - 1)
+            if x.op == mir_op_store() && x.a == begin {
+                let part = mir_vframe_field_part_of(store, indexes, function, x.place, frame_param)
+                if part != 0 {
+                    let pos = mir_vframe_field_pos_part(scan, store, frame_index, part)
+                    if mir_vframe_field_kind_pos(scan, frame_index, pos) == mir_vframe_field_scope() { return true }
+                }
+            }
+            ii = ii + 1
+        }
+        block = block + 1
+    }
+    return false
+}
+
+// A cleanup scope operand is either an anchored begin or a load from s<i>.
+fn mir_vframe_scope_value_anchor(store: MirStore, indexes: MirVIndexes, function: U64, scan: MirVFrameScan, frame_index: U64, frame_param: U64, value: U64) -> U64 {
+    let iid = mir_vframe_def_instr(store, indexes, function, value)
+    if iid == 0 { return 0 }
+    let x = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
+    if x.op == mir_op_cleanup_scope_begin() {
+        return mir_vframe_begin_anchor(store, indexes, function, scan, frame_index, frame_param, x.result).pos
+    }
+    if x.op == mir_op_load() {
+        let part = mir_vframe_field_part_of(store, indexes, function, x.place, frame_param)
+        if part != 0 {
+            let pos = mir_vframe_field_pos_part(scan, store, frame_index, part)
+            if mir_vframe_field_kind_pos(scan, frame_index, pos) == mir_vframe_field_scope() { return pos }
+        }
+    }
+    return 0
+}
+
+// True when every path from entry to b crosses a. The anchor block may not be
+// skipped on the way to a use of the scope handle.
+fn mir_vframe_block_dominates(d: Domain, store: MirStore, indexes: MirVIndexes, function: U64, a: U64, b: U64) -> Result(Bool, __s0_Error) {
+    if a == 0 || b == 0 { return Ok(false) }
+    if a == b { return Ok(true) }
+    let bcount = mir_vindex_block_count(indexes, function)
+    var visited = try __s0_buffer_new(U64, d)
+    var at: U64 = 0
+    while at <= bcount { visited = try __s0_buffer_append(U64, d, visited, 0)
+        at = at + 1 }
+    var queue = try __s0_buffer_new(U64, d)
+    queue = try __s0_buffer_append(U64, d, queue, 1)
+    __s0_buffer_set(U64, visited, 1, 1)
+    var q: U64 = 0
+    while q < __s0_buffer_len(U64, queue) {
+        let block = __s0_buffer_get(U64, queue, q)
+        q = q + 1
+        var target: U64 = 1
+        while target <= bcount {
+            if target != a && __s0_buffer_get(U64, visited, target) == 0 && mir_vframe_edge(store, indexes, function, block, target) != 0 {
+                if target == b { return Ok(false) }
+                __s0_buffer_set(U64, visited, target, 1)
+                queue = try __s0_buffer_append(U64, d, queue, target)
+            }
+            target = target + 1
+        }
+    }
+    return Ok(true)
+}
+
+fn mir_vframe_anchor_precedes(d: Domain, store: MirStore, indexes: MirVIndexes, function: U64, anchor: MirVFrameAnchor, use_block: U64, use_iid: U64) -> Result(Bool, __s0_Error) {
+    if anchor.pos == 0 { return Ok(false) }
+    if anchor.block == use_block { return Ok(anchor.instruction < use_iid) }
+    return mir_vframe_block_dominates(d, store, indexes, function, anchor.block, use_block)
+}
+
+// The first begin on the canonical resume path. A resume check follows its
+// non-cancellation edge; other dispatch targets stop the walk.
+fn mir_vframe_first_begin(store: MirStore, indexes: MirVIndexes, function: U64, target: U64) -> U64 {
+    var current = target
+    var steps: U64 = 0
+    let bcount = mir_vindex_block_count(indexes, function)
+    while current != 0 && current <= bcount && steps <= bcount {
+        let icount = mir_vindex_instr_count(indexes, function, current)
+        var ii: U64 = 0
+        while ii < icount {
+            let x = __s0_buffer_get(MirInstrRec, store.instructions, mir_vindex_instr(indexes, function, current, ii) - 1)
+            if x.op == mir_op_cleanup_scope_begin() && x.result != 0 { return x.result }
+            ii = ii + 1
+        }
+        let term_id = mir_vindex_term(indexes, function, current)
+        if term_id == 0 { return 0 }
+        let t = __s0_buffer_get(MirTermRec, store.terminators, term_id - 1)
+        if t.kind == mir_term_jump() && mir_vframe_pred_count(store, indexes, function, t.target) == 1 { current = t.target } else {
+            if t.kind == mir_term_branch() && mir_vframe_cancel_cond(store, indexes, function, t.value) && mir_vframe_pred_count(store, indexes, function, t.else_block) == 1 && t.else_block != 1 { current = t.else_block } else { current = 0 }
+        }
+        steps = steps + 1
+    }
+    return 0
+}
+
+fn mir_vframe_state_suspend_block(store: MirStore, indexes: MirVIndexes, function: U64, state_type: U64, frame_param: U64, variant: U64) -> U64 {
+    let bcount = mir_vindex_block_count(indexes, function)
+    var block: U64 = 2
+    while block <= bcount {
+        let icount = mir_vindex_instr_count(indexes, function, block)
+        var ii: U64 = 0
+        while ii < icount {
+            let x = __s0_buffer_get(MirInstrRec, store.instructions, mir_vindex_instr(indexes, function, block, ii) - 1)
+            if x.op == mir_op_store() {
+                let part = mir_vframe_field_part_of(store, indexes, function, x.place, frame_param)
+                if part != 0 && mir_vframe_field_part_word(store, part, "state") && mir_vframe_state_store_variant(store, indexes, function, state_type, x.a) == variant { return block }
+            }
+            ii = ii + 1
+        }
+        block = block + 1
+    }
+    return 0
+}
+
+fn mir_vframe_state_saves_scope(store: MirStore, indexes: MirVIndexes, function: U64, frame_param: U64, block: U64, scope_pos: U64, scan: MirVFrameScan, frame_index: U64) -> Bool {
+    let icount = mir_vindex_instr_count(indexes, function, block)
+    var state_iid: U64 = 0
+    var ii: U64 = 0
+    while ii < icount {
+        let iid = mir_vindex_instr(indexes, function, block, ii)
+        let x = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
+        let part = mir_vframe_field_part_of(store, indexes, function, x.place, frame_param)
+        if x.op == mir_op_store() && part != 0 && mir_vframe_field_part_word(store, part, "state") { state_iid = iid }
+        ii = ii + 1
+    }
+    if state_iid == 0 { return false }
+    ii = 0
+    while ii < icount {
+        let iid = mir_vindex_instr(indexes, function, block, ii)
+        if iid > state_iid {
+            let x = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
+            if x.op == mir_op_store() {
+                let part = mir_vframe_field_part_of(store, indexes, function, x.place, frame_param)
+                if part != 0 && mir_vframe_field_pos_part(scan, store, frame_index, part) == scope_pos { return true }
+            }
+        }
+        ii = ii + 1
+    }
+    return false
+}
+
+fn mir_vframe_phase7_anchors(d: Domain, store: MirStore, indexes: MirVIndexes, out0: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+    var out = out0
+    let scanned = try mir_vframe_scan(d, store, indexes)
+    let scan = scanned.scan
+    if !scan.reserved { return Ok(out) }
+    var si: U64 = 1
+    while si <= __s0_buffer_len(MirVFrameStep, scan.steps) {
+        let step = __s0_buffer_get(MirVFrameStep, scan.steps, si - 1)
+        let function = step.function
+        let frame_index = mir_vframe_frame_index(scan, step.frame_type)
+        let frame = __s0_buffer_get(MirVFrameRec, scan.frames, frame_index - 1)
+        let bcount = mir_vindex_block_count(indexes, function)
+        var block: U64 = 1
+        while block <= bcount {
+            let icount = mir_vindex_instr_count(indexes, function, block)
+            var ii: U64 = 0
+            while ii < icount {
+                let iid = mir_vindex_instr(indexes, function, block, ii)
+                let x = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
+                if x.op == mir_op_cleanup_scope_begin() {
+                    let anchor = mir_vframe_begin_anchor(store, indexes, function, scan, frame_index, step.frame_param, x.result)
+                    if anchor.pos == 0 {
+                        if mir_vframe_begin_has_scope_store(store, indexes, function, scan, frame_index, step.frame_param, x.result) {
+                            out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_cleanup(), mir_vdiag_frame_scope_anchor(), function, block, iid, 0, 0, 0, function, 0, 0, 0))
+                        }
+                    } else {
+                        var ub: U64 = 1
+                        while ub <= bcount {
+                            let ucount = mir_vindex_instr_count(indexes, function, ub)
+                            var ui: U64 = 0
+                            while ui < ucount {
+                                let uid = mir_vindex_instr(indexes, function, ub, ui)
+                                let use = __s0_buffer_get(MirInstrRec, store.instructions, uid - 1)
+                                if (use.op == mir_op_cleanup_push() || use.op == mir_op_cleanup_scope_run() || use.op == mir_op_cleanup_scope_end()) && use.a == x.result {
+                                    if !try mir_vframe_anchor_precedes(d, store, indexes, function, anchor, ub, uid) {
+                                        out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_cleanup(), mir_vdiag_frame_scope_anchor(), function, ub, uid, 0, 0, 0, function, 0, 0, 0))
+                                    }
+                                }
+                                ui = ui + 1
+                            }
+                            ub = ub + 1
+                        }
+                    }
+                }
+                if x.op == mir_op_cleanup_push() || x.op == mir_op_cleanup_scope_run() || x.op == mir_op_cleanup_scope_end() {
+                    if mir_vframe_scope_value_anchor(store, indexes, function, scan, frame_index, step.frame_param, x.a) == 0 {
+                        let def = mir_vframe_def_instr(store, indexes, function, x.a)
+                        var local_begin = false
+                        if def != 0 { let dref = __s0_buffer_get(MirInstrRec, store.instructions, def - 1)
+                            if dref.op == mir_op_cleanup_scope_begin() { local_begin = true } }
+                        if !local_begin { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_cleanup(), mir_vdiag_frame_scope_anchor(), function, block, iid, 0, 0, 0, function, 0, 0, 0)) }
+                    }
+                }
+                ii = ii + 1
+            }
+            block = block + 1
+        }
+        let vc = mir_vframe_state_variant_count(store, indexes, step.state_type)
+        let term_id = mir_vindex_term(indexes, function, 1)
+        var variant: U64 = 2
+        while variant <= vc {
+            let suspend = mir_vframe_state_suspend_block(store, indexes, function, step.state_type, step.frame_param, variant)
+            if suspend != 0 {
+                var saved_scope = false
+                var pos: U64 = 1
+                while pos <= frame.field_count {
+                    if mir_vframe_field_kind_pos(scan, frame_index, pos) == mir_vframe_field_scope() && mir_vframe_state_saves_scope(store, indexes, function, step.frame_param, suspend, pos, scan, frame_index) { saved_scope = true }
+                    pos = pos + 1
+                }
+                if saved_scope {
+                    let target = mir_vframe_state_target(store, indexes, function, step.state_type, term_id, variant)
+                    if target != 0 {
+                        let first = mir_vframe_first_begin(store, indexes, function, target)
+                        var ok = false
+                        if first != 0 {
+                            let anchor = mir_vframe_begin_anchor(store, indexes, function, scan, frame_index, step.frame_param, first)
+                            if anchor.pos != 0 && mir_vframe_state_saves_scope(store, indexes, function, step.frame_param, suspend, anchor.pos, scan, frame_index) { ok = true }
+                        }
+                        if !ok { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_cleanup(), mir_vdiag_frame_scope_anchor(), function, target, 0, 0, 0, 0, function, 0, 0, variant)) }
+                    }
+                }
+            }
+            variant = variant + 1
+        }
+        si = si + 1
+    }
+    return Ok(out)
+}
+
+fn mir_vframe_cleanup_scope_resident(d: Domain, store: MirStore, indexes: MirVIndexes, function: U64, scope: U64) -> Result(Bool, __s0_Error) {
+    let scanned = try mir_vframe_scan(d, store, indexes)
+    let scan = scanned.scan
+    let step_index = mir_vframe_step_for(scan, function)
+    if step_index == 0 { return Ok(false) }
+    let step = __s0_buffer_get(MirVFrameStep, scan.steps, step_index - 1)
+    let frame_index = mir_vframe_frame_index(scan, step.frame_type)
+    return Ok(mir_vframe_scope_value_anchor(store, indexes, function, scan, frame_index, step.frame_param, scope) != 0)
+}
+
+fn mir_vframe_suspend_return(store: MirStore, indexes: MirVIndexes, function: U64, block: U64) -> Bool {
+    if !mir_vframe_function_is_step(store, function) { return false }
+    let status = mir_vframe_status_type(store)
+    if status == 0 { return false }
+    let term_id = mir_vindex_term(indexes, function, block)
+    if term_id == 0 { return false }
+    let t = __s0_buffer_get(MirTermRec, store.terminators, term_id - 1)
+    if t.kind != mir_term_return() || t.value == 0 { return false }
+    let ordinal = mir_vframe_status_ordinal(store, indexes, function, status, t.value)
+    return ordinal == 2 || ordinal == 3
+}
+
+fn mir_vframe_reaches(d: Domain, store: MirStore, indexes: MirVIndexes, function: U64, from: U64, to: U64) -> Result(Bool, __s0_Error) {
+    if from == to { return Ok(true) }
+    let bcount = mir_vindex_block_count(indexes, function)
+    var visited = try __s0_buffer_new(U64, d)
+    var at: U64 = 0
+    while at <= bcount { visited = try __s0_buffer_append(U64, d, visited, 0)
+        at = at + 1 }
+    var queue = try __s0_buffer_new(U64, d)
+    queue = try __s0_buffer_append(U64, d, queue, from)
+    __s0_buffer_set(U64, visited, from, 1)
+    var q: U64 = 0
+    while q < __s0_buffer_len(U64, queue) { let block = __s0_buffer_get(U64, queue, q)
+        q = q + 1
+        var target: U64 = 1
+        while target <= bcount { if __s0_buffer_get(U64, visited, target) == 0 && mir_vframe_edge(store, indexes, function, block, target) != 0 { if target == to { return Ok(true) }
+                __s0_buffer_set(U64, visited, target, 1)
+                queue = try __s0_buffer_append(U64, d, queue, target) }
+            target = target + 1 } }
+    return Ok(false)
+}
+
+// Phase 7 frame cleanup rules: a registration saved into c<i> must name a
+// frame field as its push place, and a frame cleanup id is disarmed at most
+// once on any path.
+fn mir_vframe_phase7(d: Domain, store: MirStore, indexes: MirVIndexes, out0: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+    var out = out0
+    let scanned = try mir_vframe_scan(d, store, indexes)
+    let scan = scanned.scan
+    if !scan.reserved { return Ok(out) }
+    out = try mir_vframe_phase7_anchors(d, store, indexes, out)
+    var si: U64 = 1
+    while si <= __s0_buffer_len(MirVFrameStep, scan.steps) {
+        let step = __s0_buffer_get(MirVFrameStep, scan.steps, si - 1)
+        let function = step.function
+        let frame_index = mir_vframe_frame_index(scan, step.frame_type)
+        var block: U64 = 1
+        let bcount = mir_vindex_block_count(indexes, function)
+        while block <= bcount {
+            let icount = mir_vindex_instr_count(indexes, function, block)
+            var ii: U64 = 0
+            while ii < icount { let iid = mir_vindex_instr(indexes, function, block, ii)
+                let x = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
+                // A push result stored into c<i> spans a state.
+                if x.op == mir_op_store() { let part = mir_vframe_field_part_of(store, indexes, function, x.place, step.frame_param)
+                    if part != 0 { let pos = mir_vframe_field_pos_part(scan, store, frame_index, part)
+                        if mir_vframe_field_kind_pos(scan, frame_index, pos) == mir_vframe_field_cleanup() { let push_id = mir_vframe_def_instr(store, indexes, function, x.a)
+                            var ok = false
+                            if push_id != 0 { let push = __s0_buffer_get(MirInstrRec, store.instructions, push_id - 1)
+                                if push.op == mir_op_cleanup_push() && mir_vframe_place_frame_field(store, indexes, function, push.place) { ok = true } }
+                            if !ok { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_cleanup(), mir_vdiag_frame_cleanup_place(), function, block, iid, 0, x.place, 0, function, 0, 0, 0)) } } } }
+                // A frame cleanup id is disarmed at most once per path.
+                if x.op == mir_op_load() { let part = mir_vframe_field_part_of(store, indexes, function, x.place, step.frame_param)
+                    if part != 0 { let pos = mir_vframe_field_pos_part(scan, store, frame_index, part)
+                        if mir_vframe_field_kind_pos(scan, frame_index, pos) == mir_vframe_field_cleanup() {
+                            var sites = try __s0_buffer_new(U64, d)
+                            var b2: U64 = 1
+                            while b2 <= bcount { let c2 = mir_vindex_instr_count(indexes, function, b2)
+                                var j2: U64 = 0
+                                while j2 < c2 { let y = __s0_buffer_get(MirInstrRec, store.instructions, mir_vindex_instr(indexes, function, b2, j2) - 1)
+                                    if y.op == mir_op_cleanup_disarm() && y.a == x.result { sites = try __s0_buffer_append(U64, d, sites, b2) }
+                                    j2 = j2 + 1 }
+                                b2 = b2 + 1 }
+                            var a2: U64 = 0
+                            var bad = false
+                            while a2 < __s0_buffer_len(U64, sites) { var c3 = a2 + 1
+                                while c3 < __s0_buffer_len(U64, sites) { if try mir_vframe_reaches(d, store, indexes, function, __s0_buffer_get(U64, sites, a2), __s0_buffer_get(U64, sites, c3)) || try mir_vframe_reaches(d, store, indexes, function, __s0_buffer_get(U64, sites, c3), __s0_buffer_get(U64, sites, a2)) { bad = true }
+                                    c3 = c3 + 1 }
+                                a2 = a2 + 1 }
+                            if bad { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_cleanup(), mir_vdiag_frame_cleanup_disarm(), function, block, iid, 0, x.place, 0, function, 0, 0, 0)) }
+                        } } }
+                ii = ii + 1
+            }
+            block = block + 1
+        }
+        si = si + 1
+    }
+    return Ok(out)
+}
+
+fn mir_vframe_const_one(store: MirStore, indexes: MirVIndexes, function: U64, value: U64) -> Bool {
+    let iid = mir_vframe_def_instr(store, indexes, function, value)
+    if iid == 0 { return false }
+    let x = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
+    if x.op != mir_op_const_get() { return false }
+    var at: U64 = 1
+    while at <= __s0_buffer_len(MirConstRec, store.constants) { let c = __s0_buffer_get(MirConstRec, store.constants, at - 1)
+        if mir_vname_equal(store, c.name_start, c.name_end, x.name_start, x.name_end) { return c.const_type == mir_type_u64() && c.kind == mir_const_int() && c.int_value == 1 }
+        at = at + 1 }
+    return false
+}
+
+fn mir_vframe_place_frame_field_noidx(store: MirStore, function: U64, place: U64) -> Bool {
+    if place == 0 { return false }
+    let rec = __s0_buffer_get(MirPlaceRec, store.places, place - 1)
+    if rec.kind != mir_place_field() { return false }
+    let base = __s0_buffer_get(MirPlaceRec, store.places, rec.base - 1)
+    if base.kind != mir_place_deref() { return false }
+    let vi = mir_vvalue_index(store, function, base.deref_value)
+    if vi == 0 { return false }
+    let view_type = __s0_buffer_get(MirValueRec, store.values, vi - 1).value_type
+    if !mir_vframe_type_kind_is(store, view_type, mir_type_kind_safe_mut()) { return false }
+    let elem = __s0_buffer_get(MirTypeRec, store.types, view_type - 1).elem
+    if !mir_vframe_type_kind_is(store, elem, mir_type_kind_aggregate()) { return false }
+    let t = __s0_buffer_get(MirTypeRec, store.types, elem - 1)
+    return mir_vframe_prefix(store, t.name_start, t.name_end, mir_vframe_type_prefix())
+}

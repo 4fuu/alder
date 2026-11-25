@@ -1031,5 +1031,6 @@ fn mir_vphase5(d: Domain, store: MirStore, indexes: MirVIndexes, initial: __s0_B
         }
         function = function + 1
     }
+    out = try mir_vframe_phase5(d, store, indexes, out)
     return Ok(out)
 }

@@ -186,11 +186,24 @@ fn mir_v2_export_safe(store: MirStore, indexes: MirVIndexes, function: U64) -> B
     return true
 }
 
+fn mir_vframe_owner_is_frame(store: MirStore, owner: U64) -> Bool {
+    if owner < 1 || owner > __s0_buffer_len(MirTypeRec, store.types) { return false }
+    let t = __s0_buffer_get(MirTypeRec, store.types, owner - 1)
+    return t.kind == mir_type_kind_aggregate() && mir_vframe_prefix(store, t.name_start, t.name_end, mir_vframe_type_prefix())
+}
+
 fn mir_vdecl_type(d: Domain, store: MirStore, indexes: MirVIndexes, out: __s0_Buffer(MirVerifyDiagRec), function: U64, block: U64, declaration: U64, type_id: U64) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
     var result = out
     if !mir_vtype_exists(store, type_id) { return mir_vadd(d, result, mir_vdiag(mir_verify_phase_types(), mir_vdiag_bad_signature(), function, block, 0, 0, 0, type_id, declaration, 0, 0, type_id)) }
     let forbidden = try mir_vtype_has_forbidden(d, store, indexes, type_id)
-    if forbidden != 0 { result = try mir_vadd(d, result, mir_vdiag(mir_verify_phase_types(), mir_vdiag_ephemeral_type(), function, block, 0, 0, 0, type_id, declaration, 0, forbidden - 1, type_id)) }
+    var report = forbidden != 0
+    // A frame aggregate and its borrowed step parameter are the pinned
+    // declaration exception for cleanup handles; the frame scan owns those
+    // positions. Table views stay ephemeral everywhere.
+    if forbidden != 0 && forbidden - 1 != mir_type_kind_table_view() && forbidden - 1 != mir_type_kind_table_mut_view() {
+        if try mir_vtype_contains_frame_name(d, store, indexes, type_id) { report = false }
+    }
+    if report { result = try mir_vadd(d, result, mir_vdiag(mir_verify_phase_types(), mir_vdiag_ephemeral_type(), function, block, 0, 0, 0, type_id, declaration, 0, forbidden - 1, type_id)) }
     return Ok(result)
 }
 fn mir_vphase2(d: Domain, store: MirStore, indexes: MirVIndexes, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
@@ -237,7 +250,11 @@ if q.owner == p.owner && q.kind == p.kind && mir_vname_equal(store, p.name_start
 scan = at }
 scan = scan + 1 }
         }
-        out = try mir_vdecl_type(d, store, indexes, out, 0, 0, at + 1, p.part_type)
+        if p.kind == mir_type_part_field() && mir_vframe_owner_is_frame(store, p.owner) {
+            if !mir_vtype_exists(store, p.part_type) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_type_child(), 0, 0, 0, 0, 0, p.owner, at + 1, 0, 0, p.part_type)) }
+        } else {
+            out = try mir_vdecl_type(d, store, indexes, out, 0, 0, at + 1, p.part_type)
+        }
         at = at + 1
     }
     // Constants retain exact bit-level payloads.
@@ -282,5 +299,9 @@ at = at + 1 }
     while at < __s0_buffer_len(MirLocalRec, store.locals) { let l = __s0_buffer_get(MirLocalRec, store.locals, at)
 out = try mir_vdecl_type(d, store, indexes, out, l.function, 0, at + 1, l.local_type)
 at = at + 1 }
+    let scanned = try mir_vframe_scan(d, store, indexes)
+    var sdi: U64 = 0
+    while sdi < __s0_buffer_len(MirVerifyDiagRec, scanned.diagnostics) { out = try __s0_buffer_append(MirVerifyDiagRec, d, out, __s0_buffer_get(MirVerifyDiagRec, scanned.diagnostics, sdi))
+        sdi = sdi + 1 }
     return Ok(out)
 }

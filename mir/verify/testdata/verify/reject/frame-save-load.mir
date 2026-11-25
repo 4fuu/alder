@@ -1,0 +1,184 @@
+mir 6
+
+# The worked example from docs/mir.md "Suspending Instances and Step Frames".
+# Supporting declarations the document elides are written out: Evented, Path,
+# IoError, the string constant used by the leaf result, task_cancelled, and the
+# leaf read_text.Evented step whose frame type size.Evented names in x0. The
+# cleanup_id field c0 exercises the frame field exemption without being live
+# across the illustrated suspension point. Adaptation: the source returns
+# Ok(text.len()), so bb_join extracts the copied callee result's ok payload and
+# constructs the u64 result before storing out; the document's sketch stored
+# the callee's result(string, @IoError) directly, which does not type-check.
+
+type @Evented {
+  id: u64
+}
+
+type @Path {
+  len: u64
+}
+
+type @IoError {
+  code: u64
+}
+
+const @one: u64 = 1
+const @false: bool = false
+const @empty: string = ""
+
+enum @__alder_step.status {
+  done
+  call
+  park
+  cancelled
+}
+
+enum @__alder_step.state.size.Evented {
+  entry
+  resume0
+}
+
+enum @__alder_step.state.read_text.Evented {
+  entry
+  resume0
+}
+
+type @__alder_step.frame.read_text.Evented {
+  state: @__alder_step.state.read_text.Evented
+  p0: @Evented
+  p1: @Path
+  out: result(string, @IoError)
+}
+
+type @__alder_step.frame.size.Evented {
+  state: @__alder_step.state.size.Evented
+  p0: @Evented
+  p1: @Path
+  x0: safe_mut(@__alder_step.frame.read_text.Evented)
+  y0: domain_handle
+  c0: cleanup_id
+  out: result(u64, @IoError)
+}
+
+binding @runtime "alder.h" {
+  c_fn @task_cancelled = "alder_task_cancelled"() -> bool
+}
+
+fn @read_text.Blocking(%d: domain_handle, %io: @Evented, %path: @Path) -> result(string, @IoError) {
+bb0:
+  panic
+}
+
+fn @size.Blocking(%d: domain_handle, %io: @Evented, %path: @Path) -> result(u64, @IoError) {
+bb0:
+  %r = call @read_text.Blocking(%d, %io, %path)
+  switch %r {
+    err(%e) -> bb_err
+    ok(%text) -> bb_ok
+  }
+
+bb_err:
+  %f = enum.construct result(u64, @IoError), err, %e
+  fail %f
+
+bb_ok:
+  %n = str.len %text
+  %o = enum.construct result(u64, @IoError), ok, %n
+  return %o
+}
+
+fn @__alder_step.run.read_text.Evented(%d: domain_handle, %frame: safe_mut(@__alder_step.frame.read_text.Evented), %frame_owner: domain_handle) -> @__alder_step.status {
+bb0:
+  %state = load field(deref %frame, state)
+  switch %state {
+    entry -> bb_entry
+    resume0 -> bb_resume0
+  }
+
+bb_entry:
+  %cancelled = c.call.unsafe @runtime.task_cancelled()
+  branch %cancelled, bb_cancel0, bb_park
+
+bb_park:
+  %resume = enum.construct @__alder_step.state.read_text.Evented, resume0
+  store field(deref %frame, state), %resume
+  %park = enum.construct @__alder_step.status, park
+  return %park
+
+bb_resume0:
+  %cancelled0 = c.call.unsafe @runtime.task_cancelled()
+  branch %cancelled0, bb_cancel1, bb_done
+
+bb_done:
+  %empty = const.get @empty
+  %ok = enum.construct result(string, @IoError), ok, %empty
+  store field(deref %frame, out), %ok
+  %done = enum.construct @__alder_step.status, done
+  return %done
+
+bb_cancel0:
+  %st_cancel0 = enum.construct @__alder_step.status, cancelled
+  return %st_cancel0
+
+bb_cancel1:
+  %st_cancel1 = enum.construct @__alder_step.status, cancelled
+  return %st_cancel1
+}
+
+fn @__alder_step.run.size.Evented(%d: domain_handle, %frame: safe_mut(@__alder_step.frame.size.Evented), %frame_owner: domain_handle) -> @__alder_step.status {
+bb0:
+  %state = load field(deref %frame, state)
+  switch %state {
+    entry -> bb_entry
+    resume0 -> bb_resume0
+  }
+
+bb_entry:
+  %cancelled = c.call.unsafe @runtime.task_cancelled()
+  branch %cancelled, bb_cancel0, bb_call0
+
+bb_call0:
+  %one = const.get @one
+  %child_domain = domain.create %frame_owner
+  %child = alloc %child_domain, @__alder_step.frame.read_text.Evented, %one
+  %p0 = load field(deref %frame, p0)
+  store field(deref %child, p0), %p0
+  %p1 = load field(deref %frame, p1)
+  store field(deref %child, p1), %p1
+  %entry = enum.construct @__alder_step.state.read_text.Evented, entry
+  store field(deref %child, state), %entry
+  %resume = enum.construct @__alder_step.state.size.Evented, resume0
+  store field(deref %frame, state), %resume
+  store field(deref %frame, x0), %child
+  store field(deref %frame, y0), %child_domain
+  %call = enum.construct @__alder_step.status, call
+  return %call
+
+bb_resume0:
+  %cancelled0 = c.call.unsafe @runtime.task_cancelled()
+  branch %cancelled0, bb_cancel1, bb_join
+
+bb_join:
+  %child0 = load field(deref %frame, x0)
+  %r = load field(deref %child0, out)
+  %own = copy_to_domain %d, %r
+  %text = enum.payload.checked %own, ok else bb_panic
+  %n = str.len %text
+  %result = enum.construct result(u64, @IoError), ok, %n
+  store field(deref %frame, out), %result
+  %done = enum.construct @__alder_step.status, done
+  return %done
+
+bb_panic:
+  panic
+
+bb_cancel0:
+  %st_cancel0 = enum.construct @__alder_step.status, cancelled
+  return %st_cancel0
+
+bb_cancel1:
+  %child_domain1 = load field(deref %frame, y0)
+  domain.destroy %child_domain1
+  %st_cancel1 = enum.construct @__alder_step.status, cancelled
+  return %st_cancel1
+}
