@@ -1375,6 +1375,13 @@ plus one activation domain. A wakeup re-enters only the top activation at its
 saved state; completion then propagates up the stack one popped activation
 per executor round.
 
+A recursive instance's frame references itself: its call-handoff field is
+`x<i>: safe_mut(@__alder_step.frame.<self>)`. A frame aggregate may therefore
+reference its own type through a `safe_mut` field, and the frame's name is in
+scope inside its own declaration. This self-reference is reserved to
+`@__alder_step.frame.*` types; it does not generalize to user aggregates, and
+the verifier applies the ordinary frame rules to the self-referential field.
+
 Recursion that changes the capability type is specialization-expanding and is
 rejected before monomorphization, so it never produces a new step instance.
 
