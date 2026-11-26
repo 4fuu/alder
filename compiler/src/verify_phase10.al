@@ -47,9 +47,12 @@ fn mir_v10_external_name(store: MirStore, start: U64, end: U64) -> Bool {
 // legal; a wrong spelling is caught by the generated probes. Still rejected:
 // leading underscores, C keywords, and the runtime namespace.
 fn mir_v10_binding_name(store: MirStore, start: U64, end: U64) -> Bool {
-    // The frame contract pins one runtime entry as a binding call target:
-    // the executor's cancellation observation.
+    // The frame contract pins runtime entries used as binding call targets:
+    // cancellation observation, the park marker, and the teardown shield.
     if mir_vname_word(store, start, end, "alder_task_cancelled") { return true }
+    if mir_vname_word(store, start, end, "alder_task_park") { return true }
+    if mir_vname_word(store, start, end, "alder_task_shield_push") { return true }
+    if mir_vname_word(store, start, end, "alder_task_shield_pop") { return true }
     if !mir_vname_valid(store, start, end, false) || __s0_buffer_get(U8, store.names, start) == 95 { return false }
     if mir_v10_name_prefix(store, start, end, "alder_") || mir_v10_name_prefix(store, start, end, "ALDER_") || mir_v10_name_prefix(store, start, end, "Alder") { return false }
     return !mir_v10_name_list(store, start, end, "_Alignas,_Alignof,_Atomic,_Bool,_Complex,_Generic,_Imaginary,_Noreturn,_Static_assert,_Thread_local,auto,break,case,char,const,continue,default,do,double,else,enum,extern,float,for,goto,if,inline,int,long,register,restrict,return,short,signed,sizeof,static,struct,switch,typedef,union,unsigned,void,volatile,while")

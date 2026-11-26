@@ -90,7 +90,14 @@ fn cgen_emit_step_thunks(d: Domain, initial: CgenWriter, store: MirStore) -> Res
         var call_at: U64 = 0
         while call_at < step.call_count {
             let call = __s0_buffer_get(MirStepCallRec, store.step_calls, step.first_call - 1 + call_at)
-            if call.kind == 1 {
+            var duplicate = false
+            var prior: U64 = 0
+            while prior < call_at {
+                let earlier = __s0_buffer_get(MirStepCallRec, store.step_calls, step.first_call - 1 + prior)
+                if (earlier.kind == 1 || earlier.kind == 2) && earlier.resume == call.resume { duplicate = true }
+                prior = prior + 1
+            }
+            if !duplicate && (call.kind == 1 || call.kind == 2) {
                 out = try cgen_put(d, out, "    case ")
                 out = try cgen_put_u64(d, out, call.resume)
                 out = try cgen_put(d, out, ":\n      alder_task_call(alder_task, ")
@@ -630,17 +637,29 @@ fn cgen_emit_functions(d: Domain, initial: CgenWriter, store: MirStore, indexes:
     var at: U64 = 0
     while at < __s0_buffer_len(MirFunctionRec, store.functions) {
         let item = __s0_buffer_get(MirFunctionRec, store.functions, at)
-        out = try cgen_put_function_linkage(d, out, store, at + 1)
-        if item.result_type == mir_type_unit() { out = try cgen_put(d, out, "void") } else { out = try cgen_put_type(d, out, store, item.result_type) }
-        out = try cgen_put(d, out, " ")
-        out = try cgen_emit_function_name(d, out, store, at + 1)
-        out = try cgen_put(d, out, "(")
-        out = try cgen_emit_function_params(d, out, store, indexes, at + 1)
-        out = try cgen_put(d, out, ");\n")
+        if cgen_step_index_for_direct(store, at + 1) == 0 {
+            out = try cgen_put_function_linkage(d, out, store, at + 1)
+            if item.result_type == mir_type_unit() { out = try cgen_put(d, out, "void") } else { out = try cgen_put_type(d, out, store, item.result_type) }
+            out = try cgen_put(d, out, " ")
+            out = try cgen_emit_function_name(d, out, store, at + 1)
+            out = try cgen_put(d, out, "(")
+            out = try cgen_emit_function_params(d, out, store, indexes, at + 1)
+            out = try cgen_put(d, out, ");\n")
+        }
         at = at + 1
     }
     if __s0_buffer_len(MirFunctionRec, store.functions) > 0 { out = try cgen_put(d, out, "\n") }
     return Ok(out)
+}
+
+fn cgen_step_function_for_direct(store: MirStore, direct: U64) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirStepRec, store.steps) {
+        let rec = __s0_buffer_get(MirStepRec, store.steps, at)
+        if rec.direct == direct { return rec.function }
+        at = at + 1
+    }
+    return 0
 }
 
 fn cgen_step_index_for_direct(store: MirStore, direct: U64) -> U64 {
@@ -650,6 +669,17 @@ fn cgen_step_index_for_direct(store: MirStore, direct: U64) -> U64 {
         at = at + 1
     }
     return 0
+}
+
+fn cgen_emit_program_bodies(d: Domain, initial: CgenWriter, store: MirStore) -> Result(CgenWriter, __s0_Error) {
+    var out = initial
+    let indexes = try mir_vindex_build(d, store)
+    var function: U64 = 1
+    while function <= __s0_buffer_len(MirFunctionRec, store.functions) {
+        if cgen_step_index_for_direct(store, function) == 0 { out = try cgen_emit_function_body(d, out, store, indexes, function) }
+        function = function + 1
+    }
+    return Ok(out)
 }
 
 fn cgen_emit_host_entry(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, main: U64) -> Result(CgenWriter, __s0_Error) {
@@ -710,16 +740,43 @@ fn cgen_cleanup_owner_field(store: MirStore, indexes: MirVIndexes, item: MirInst
     return 0
 }
 
+fn cgen_cleanup_direct_owner(store: MirStore, indexes: MirVIndexes, item: MirInstrRec, at: U64) -> Bool {
+    if item.place == 0 || cgen_cleanup_owner_field(store, indexes, item, at) != 1 { return false }
+    let count = cgen_operand_count(store, indexes, mir_operand_instruction(), at, 0)
+    var fields: U64 = 0
+    var ordinal: U64 = 0
+    while ordinal < count {
+        let parameter = cgen_function_param(store, indexes, item.target, ordinal)
+        if parameter.param_type != mir_type_unit() { fields = fields + 1 }
+        ordinal = ordinal + 1
+    }
+    return fields == 1
+}
+
 fn cgen_emit_cleanup_sites(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes) -> Result(CgenWriter, __s0_Error) {
     var out = initial
     var at: U64 = 0
     var wrote = false
     while at < __s0_buffer_len(MirInstrRec, store.instructions) {
         let item = __s0_buffer_get(MirInstrRec, store.instructions, at)
-        if item.op == mir_op_cleanup_push() {
+        if item.op == mir_op_cleanup_push() && cgen_step_index_for_direct(store, item.target) == 0 {
             let count = cgen_operand_count(store, indexes, mir_operand_instruction(), at + 1, 0)
             let owner_field = cgen_cleanup_owner_field(store, indexes, item, at + 1)
             let place_based = item.place != 0 && owner_field != 0
+            let direct_owner = cgen_cleanup_direct_owner(store, indexes, item, at + 1)
+            if direct_owner {
+                out = try cgen_put(d, out, "static ALDER_MAYBE_UNUSED void alder_cleanup_")
+                out = try cgen_put_u64(d, out, at)
+                out = try cgen_put(d, out, "(void *alder_ctx) \{\n  ")
+                out = try cgen_put_type(d, out, store, cgen_place_type(store, indexes, item.function, item.place))
+                out = try cgen_put(d, out, " *alder_owner = (")
+                out = try cgen_put_type(d, out, store, cgen_place_type(store, indexes, item.function, item.place))
+                out = try cgen_put(d, out, " *)alder_ctx;\n  ")
+                out = try cgen_emit_function_name(d, out, store, item.target)
+                out = try cgen_put(d, out, "(*alder_owner);\n}\n")
+                wrote = true
+            }
+            if !direct_owner {
             out = try cgen_put(d, out, "typedef struct AlderCtx_")
             out = try cgen_put_u64(d, out, at)
             out = try cgen_put(d, out, " \{\n")
@@ -779,6 +836,7 @@ fn cgen_emit_cleanup_sites(d: Domain, initial: CgenWriter, store: MirStore, inde
             }
             out = try cgen_put(d, out, ");\n}\n")
             wrote = true
+            }
         }
         at = at + 1
     }
@@ -1563,7 +1621,7 @@ fn cgen_build(d: Domain, store: MirStore, indexes: MirVIndexes, verified: MirVer
     out = try cgen_emit_fn_value_wrappers(d, out, store, indexes, fn_value_sites)
     out = try cgen_emit_callback_owner_releases(d, out, store)
     out = try cgen_emit_callback_trampolines(d, out, store, indexes)
-    out = try cgen_emit_bodies(d, out, store)
+    out = try cgen_emit_program_bodies(d, out, store)
     out = try cgen_emit_step_thunks(d, out, store)
     out = try cgen_emit_exports(d, out, store, indexes)
     if verified.hosted { out = try cgen_emit_host_entry(d, out, store, indexes, verified.entry) }

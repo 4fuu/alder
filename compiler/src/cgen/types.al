@@ -140,6 +140,71 @@ fn cgen_step_has_scope(store: MirStore, step: U64, instruction: U64) -> Bool {
     return false
 }
 
+fn cgen_digit(byte: U8) -> U64 {
+    if byte == 48 { return 0 }
+    if byte == 49 { return 1 }
+    if byte == 50 { return 2 }
+    if byte == 51 { return 3 }
+    if byte == 52 { return 4 }
+    if byte == 53 { return 5 }
+    if byte == 54 { return 6 }
+    if byte == 55 { return 7 }
+    if byte == 56 { return 8 }
+    if byte == 57 { return 9 }
+    return 10
+}
+
+fn cgen_field_index(store: MirStore, start: U64, end: U64, prefix: __s0_String) -> U64 {
+    if end - start <= len(prefix) || end > __s0_buffer_len(U8, store.names) { return 0 }
+    var at: U64 = 0
+    while at < len(prefix) {
+        if __s0_buffer_get(U8, store.names, start + at) != prefix[at] { return 0 }
+        at = at + 1
+    }
+    var index: U64 = 0
+    while at < end - start {
+        let digit = cgen_digit(__s0_buffer_get(U8, store.names, start + at))
+        if digit == 10 { return 0 }
+        index = index * 10 + digit
+        at = at + 1
+    }
+    return index + 1
+}
+
+fn cgen_scope_slot_for_begin(store: MirStore, function: U64, instruction: U64) -> U64 {
+    if instruction == 0 || instruction > __s0_buffer_len(MirInstrRec, store.instructions) { return 0 }
+    let begin = __s0_buffer_get(MirInstrRec, store.instructions, instruction - 1)
+    if begin.result == 0 { return 0 }
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirInstrRec, store.instructions) {
+        let item = __s0_buffer_get(MirInstrRec, store.instructions, at)
+        if item.function == function && item.op == mir_op_store() && item.a == begin.result && item.place != 0 {
+            let place = __s0_buffer_get(MirPlaceRec, store.places, item.place - 1)
+            if place.kind == mir_place_field() {
+                let index = cgen_field_index(store, place.field_start, place.field_end, "s")
+                if index != 0 { return index }
+            }
+        }
+        at = at + 1
+    }
+    return 0
+}
+
+fn cgen_scope_slot_for_value(store: MirStore, function: U64, value: U64) -> U64 {
+    if value == 0 || value > __s0_buffer_len(MirValueRec, store.values) { return 0 }
+    let v = __s0_buffer_get(MirValueRec, store.values, value - 1)
+    if v.function != function || v.def_kind != mir_value_def_instruction() || v.item == 0 { return 0 }
+    let def = lower_def_instr_for_cgen(store, v)
+    if def == 0 { return 0 }
+    let item = __s0_buffer_get(MirInstrRec, store.instructions, def - 1)
+    if item.op == mir_op_cleanup_scope_begin() { return cgen_scope_slot_for_begin(store, function, def) }
+    if item.op == mir_op_load() && item.place != 0 {
+        let place = __s0_buffer_get(MirPlaceRec, store.places, item.place - 1)
+        if place.kind == mir_place_field() { return cgen_field_index(store, place.field_start, place.field_end, "s") }
+    }
+    return 0
+}
+
 fn cgen_emit_type(d: Domain, initial: CgenTypeState, store: MirStore, id: U64) -> Result(CgenTypeState, __s0_Error) {
     if id <= mir_primitive_type_count() || cgen_emitted(initial.emitted, id) { return Ok(initial) }
     var state = initial

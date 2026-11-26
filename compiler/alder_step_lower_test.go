@@ -409,3 +409,94 @@ pub fn main() -> I32 {
 	}
 	checkLowerGolden(t, "step-cleanup.mir", out)
 }
+
+func runAlderStepCleanupCursorLowerConformance(t *testing.T, exe string) {
+	t.Helper()
+	files := map[string]string{
+		"private.marker": "Map(\n",
+		"std/io.al": `module std.io
+
+pub trait Io {
+}
+
+pub trait BlockingIo {
+}
+
+pub trait AsyncIo {
+}
+
+pub type Blocking {
+}
+
+impl Io for Blocking {
+}
+
+impl BlockingIo for Blocking {
+}
+`,
+		"cleanup-cursor.al": `module step.cleanup.cursor
+
+import std.io { AsyncIo, Blocking, Io }
+
+type Res {
+    id: U64
+}
+
+impl Cleanup for Res {
+    fn cleanup(take self) -> Unit {
+        let io = TestIo()
+        let x = leaf(io, 1)
+        return
+    }
+}
+
+type TestIo {
+}
+
+impl Io for TestIo {
+}
+
+impl AsyncIo for TestIo {
+}
+
+fn leaf(I: type(Io), io: I, n: U64) -> U64 {
+    return n + 1
+}
+
+fn work(I: type(Io), io: I, n: U64) -> U64 {
+    let r = Res(id: n)
+    using held = r
+    let a = leaf(io, n)
+    return a
+}
+
+pub fn main() -> I32 {
+    let block = Blocking()
+    let test = TestIo()
+    let a = work(block, 40)
+    let b = work(test, 40)
+    if a != b { return 1 }
+    if a != 41 { return 2 }
+    return 0
+}
+`,
+	}
+	out := runLowerCompiler(t, exe, files, []string{"std/io.al", "cleanup-cursor.al"})
+	module, err := mir.Parse(string(out))
+	if err != nil {
+		t.Fatalf("parse cleanup cursor step MIR: %v\n%s", err, out)
+	}
+	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+		t.Fatalf("verify cleanup cursor step MIR: %s\n%s", verify.Errors(diagnostics), out)
+	}
+	has_cleanup := false
+	for _, function := range module.Functions {
+		if strings.HasPrefix(function.Name, "__alder_step.run.cleanup") {
+			has_cleanup = true
+		}
+	}
+	if !has_cleanup {
+		t.Fatalf("cleanup cursor MIR has no cleanup step function\n%s", out)
+	}
+	checkLowerGolden(t, "step-cleanup-cursor.mir", out)
+}

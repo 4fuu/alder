@@ -1175,7 +1175,8 @@ fn mir_instruction_operands_valid(idx: MirPrintIndex, store: MirStore, id: U64, 
         if rec.place != 0 {
             if !mir_id_valid(rec.place, __s0_buffer_len(MirPlaceRec, store.places)) { return false }
             if __s0_buffer_get(MirPlaceRec, store.places, rec.place - 1).function != rec.function { return false }
-            if __s0_buffer_get(MirPlaceRec, store.places, rec.place - 1).kind != mir_place_local() { return false }
+            let place = __s0_buffer_get(MirPlaceRec, store.places, rec.place - 1)
+            if place.kind != mir_place_local() && place.kind != mir_place_field() { return false }
         }
     }
     if rec.op == mir_op_slice_range_checked() {

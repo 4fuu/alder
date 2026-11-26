@@ -489,6 +489,10 @@ type MirStepCallRec {
     x_field: U64
     y_field: U64
     callee: U64
+    instruction: U64
+    domain_instruction: U64
+    continuation: U64
+    continuation_field: U64
 }
 
 type MirStepRec {

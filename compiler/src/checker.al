@@ -2357,6 +2357,9 @@ fn binding_spelling_valid(state: State, spelling: BindingSpellingRec) -> Bool {
     let width = spelling.end - spelling.start
     if width == 0 { return false }
     if binding_spelling_byte(state, spelling, 0) == 95 { return false }
+    // The park marker is the one runtime-namespace binding exception the
+    // checker admits; its resolved call is recorded as a park suspension.
+    if binding_spelling_word(state, spelling, "alder_task_park") { return true }
     if width >= 6 && (binding_spelling_prefix(state, spelling, "alder_") || binding_spelling_prefix(state, spelling, "ALDER_")) { return false }
     if width >= 5 && binding_spelling_prefix(state, spelling, "Alder") { return false }
     var at: U64 = 0
@@ -6477,6 +6480,10 @@ fn append_call_expression(d: Domain, state: State, parse: ParseStore, store: Che
         let probe = try callee_signature_suspends(d, state, store, target)
         if probe.too_deep { return expr_token_fail(d, state, store, 349, call_callee_syntax(parse, syntax)) }
         if probe.suspends { suspends = 1 }
+    }
+    if annotation_kind == 7 && target >= 1 && target <= __s0_buffer_len(BindingMemberRec, store.bindings.members) {
+        let member = __s0_buffer_get(BindingMemberRec, store.bindings.members, target - 1)
+        if binding_spelling_word(state, binding_member_spelling_rec(member), "alder_task_park") { suspends = 1 }
     }
     let annotations = try __s0_buffer_append(CallAnnotationRec, d, store.call_annotations, CallAnnotationRec(owner: owner, kind: annotation_kind, target: target, checked_type: checked_type, variant_use: variant_use, builtin: builtin, place: 0, suspends: suspends))
     let annotation = __s0_buffer_len(CallAnnotationRec, annotations)

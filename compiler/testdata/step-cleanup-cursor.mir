@@ -1,0 +1,651 @@
+mir 6
+
+type @Res15 {
+  id: u64
+}
+
+type @TestIo16 {
+}
+
+type @Blocking17 {
+}
+
+enum @__alder_step.status {
+  done
+  call
+  park
+  cancelled
+}
+
+enum @__alder_step.state.leaf11 {
+  entry
+}
+
+type @__alder_step.frame.leaf11 {
+  state: @__alder_step.state.leaf11
+  p0: @TestIo16
+  p1: u64
+  out: u64
+}
+
+enum @__alder_step.state.cleanup2 {
+  entry
+  resume0
+}
+
+type @__alder_step.frame.cleanup2 {
+  state: @__alder_step.state.cleanup2
+  p0: @Res15
+  x0: safe_mut(@__alder_step.frame.leaf11)
+  y0: domain_handle
+  out: unit
+}
+
+enum @__alder_step.state.work13 {
+  entry
+  resume0
+  cleanup0
+}
+
+type @__alder_step.frame.work13 {
+  state: @__alder_step.state.work13
+  p0: @TestIo16
+  p1: u64
+  x0: safe_mut(@__alder_step.frame.leaf11)
+  y0: domain_handle
+  x1: safe_mut(@__alder_step.frame.cleanup2)
+  y1: domain_handle
+  l0: @Res15
+  v0: u64
+  s0: cleanup_scope
+  out: u64
+}
+
+enum @__alder_step.state.main6 {
+  entry
+  resume0
+}
+
+type @__alder_step.frame.main6 {
+  state: @__alder_step.state.main6
+  x0: safe_mut(@__alder_step.frame.work13)
+  y0: domain_handle
+  l0: u64
+  out: i32
+}
+
+const @lit3: u64 = 1
+
+const @lit8: u64 = 40
+
+const @lit11: u64 = 40
+
+const @lit16: i32 = 1
+
+const @lit18: u64 = 41
+
+const @lit20: i32 = 2
+
+const @lit21: i32 = 0
+
+const @lit23: u64 = 1
+
+const @lit40: u64 = 1
+
+const @__alder_step_one: u64 = 1
+
+const @__alder_step_unit: unit = ()
+
+const @__alder_step_false: bool = false
+
+binding @alder_step_runtime "alder.h" {
+  c_fn @task_cancelled = "alder_task_cancelled"() -> bool
+}
+
+fn @cleanup2(%self: @Res15) {
+  local %self: @Res15
+  local %io: @TestIo16
+  local %x: u64
+
+bb0:
+  store local %self, %self
+  %v2 = aggregate.construct @TestIo16 {  }
+  store local %io, %v2
+  %v3 = load local %io
+  %v4 = const.get @lit3
+  %v5 = call @leaf11(%v3, %v4)
+  store local %x, %v5
+  return
+
+bb_panic:
+  panic
+}
+
+fn @main6() -> i32 {
+  local %block: @Blocking17
+  local %test: @TestIo16
+  local %a: u64
+  local %b: u64
+
+bb0:
+  %v6 = aggregate.construct @Blocking17 {  }
+  store local %block, %v6
+  %v7 = aggregate.construct @TestIo16 {  }
+  store local %test, %v7
+  %v8 = load local %block
+  %v9 = const.get @lit8
+  %v10 = call @work12(%v8, %v9)
+  store local %a, %v10
+  %v11 = load local %test
+  %v12 = const.get @lit11
+  %v13 = call @work13(%v11, %v12)
+  store local %b, %v13
+  %v14 = load local %a
+  %v15 = load local %b
+  %v16 = int.ne %v14, %v15
+  branch %v16, bb_then2, bb_else3
+
+bb_panic:
+  panic
+
+bb_then2:
+  %v17 = const.get @lit16
+  return %v17
+
+bb_else3:
+  jump bb_join4
+
+bb_join4:
+  %v18 = load local %a
+  %v19 = const.get @lit18
+  %v20 = int.ne %v18, %v19
+  branch %v20, bb_then5, bb_else6
+
+bb_then5:
+  %v21 = const.get @lit20
+  return %v21
+
+bb_else6:
+  jump bb_join7
+
+bb_join7:
+  %v22 = const.get @lit21
+  return %v22
+}
+
+fn @leaf11(%io: @TestIo16, %n: u64) -> u64 {
+bb0:
+  %v25 = const.get @lit23
+  %v26 = int.add.checked %n, %v25 else bb_panic
+  return %v26
+
+bb_panic:
+  panic
+}
+
+fn @work12(%io: @Blocking17, %n: u64) -> u64 {
+  local %r: @Res15
+  local %held: @Res15
+  local %a: u64
+
+bb0:
+  %v29 = aggregate.construct @Res15 { id: %n }
+  store local %r, %v29
+  %v30 = load local %r
+  store local %held, %v30
+  %cleanup_scope13 = cleanup.scope.begin
+  %cleanup_id13 = cleanup.push %cleanup_scope13, @cleanup2, (%v30) place local %held
+  %v33 = call @leaf14(%io, %n)
+  store local %a, %v33
+  %v34 = load local %a
+  cleanup.scope.run %cleanup_scope13
+  cleanup.scope.end %cleanup_scope13
+  return %v34
+
+bb_panic:
+  panic
+
+bb_cleanup_panic2:
+  cleanup.scope.run %cleanup_scope13
+  cleanup.scope.end %cleanup_scope13
+  jump bb_panic
+
+bb_cleanup_panic3:
+  cleanup.scope.run %cleanup_scope13
+  cleanup.scope.end %cleanup_scope13
+  jump bb_panic
+}
+
+fn @work13(%io: @TestIo16, %n: u64) -> u64 {
+  local %r: @Res15
+  local %held: @Res15
+  local %a: u64
+
+bb0:
+  %v37 = aggregate.construct @Res15 { id: %n }
+  store local %r, %v37
+  %v38 = load local %r
+  store local %held, %v38
+  %cleanup_scope18 = cleanup.scope.begin
+  %cleanup_id18 = cleanup.push %cleanup_scope18, @cleanup2, (%v38) place local %held
+  %v41 = call @leaf11(%io, %n)
+  store local %a, %v41
+  %v42 = load local %a
+  cleanup.scope.run %cleanup_scope18
+  cleanup.scope.end %cleanup_scope18
+  return %v42
+
+bb_panic:
+  panic
+
+bb_cleanup_panic2:
+  cleanup.scope.run %cleanup_scope18
+  cleanup.scope.end %cleanup_scope18
+  jump bb_panic
+
+bb_cleanup_panic3:
+  cleanup.scope.run %cleanup_scope18
+  cleanup.scope.end %cleanup_scope18
+  jump bb_panic
+}
+
+fn @leaf14(%io: @Blocking17, %n: u64) -> u64 {
+bb0:
+  %v45 = const.get @lit40
+  %v46 = int.add.checked %n, %v45 else bb_panic
+  return %v46
+
+bb_panic:
+  panic
+}
+
+fn @__alder_step.run.leaf11(%d: domain_handle, %frame: safe_mut(@__alder_step.frame.leaf11), %frame_owner: domain_handle) -> @__alder_step.status {
+bb0:
+  %__alder_step_v51 = load field(deref %frame, state)
+  switch %__alder_step_v51 {
+    entry -> bb_entry
+  }
+
+bb_entry:
+  %__alder_step_v52 = c.call.unsafe @alder_step_runtime.task_cancelled()
+  branch %__alder_step_v52, bb_cancel_entry, bb_entry_go
+
+bb_entry_go:
+  %__alder_step_v54 = load field(deref %frame, p0)
+  %__alder_step_v55 = load field(deref %frame, p1)
+  %__alder_step_v49 = const.get @lit23
+  %__alder_step_v50 = int.add.checked %__alder_step_v55, %__alder_step_v49 else bb_old_2
+  store field(deref %frame, out), %__alder_step_v50
+  %__alder_step_v56 = enum.construct @__alder_step.status, done
+  return %__alder_step_v56
+
+bb_old_2:
+  %__alder_step_v57 = load field(deref %frame, p0)
+  %__alder_step_v58 = load field(deref %frame, p1)
+  panic
+
+bb_cancel_entry:
+  %__alder_step_v53 = enum.construct @__alder_step.status, cancelled
+  return %__alder_step_v53
+}
+
+fn @__alder_step.run.cleanup2(%d: domain_handle, %frame: safe_mut(@__alder_step.frame.cleanup2), %frame_owner: domain_handle) -> @__alder_step.status {
+  local %self: @Res15
+  local %io: @TestIo16
+  local %x: u64
+
+bb0:
+  %__alder_step_v65 = load field(deref %frame, state)
+  switch %__alder_step_v65 {
+    entry -> bb_entry
+    resume0 -> bb_resume_0
+  }
+
+bb_entry:
+  %__alder_step_v66 = c.call.unsafe @alder_step_runtime.task_cancelled()
+  branch %__alder_step_v66, bb_cancel_entry, bb_entry_go
+
+bb_entry_go:
+  %__alder_step_v80 = load field(deref %frame, p0)
+  store local %self, %__alder_step_v80
+  %__alder_step_v62 = aggregate.construct @TestIo16 {  }
+  store local %io, %__alder_step_v62
+  %__alder_step_v63 = load local %io
+  %__alder_step_v64 = const.get @lit3
+  %__alder_step_v81 = c.call.unsafe @alder_step_runtime.task_cancelled()
+  branch %__alder_step_v81, bb_cancel_pre_0, bb_suspend_0
+
+bb_old_2:
+  %__alder_step_v82 = load field(deref %frame, p0)
+  panic
+
+bb_suspend_0:
+  %__alder_step_v73 = load field(deref %frame, p0)
+  %__alder_step_v74 = const.get @__alder_step_one
+  %__alder_step_v75 = domain.create %frame_owner
+  %__alder_step_v76 = alloc %__alder_step_v75, @__alder_step.frame.leaf11, %__alder_step_v74
+  %__alder_step_v77 = enum.construct @__alder_step.state.leaf11, entry
+  store field(deref %__alder_step_v76, state), %__alder_step_v77
+  store field(deref %__alder_step_v76, p0), %__alder_step_v63
+  store field(deref %__alder_step_v76, p1), %__alder_step_v64
+  %__alder_step_v78 = enum.construct @__alder_step.state.cleanup2, resume0
+  store field(deref %frame, state), %__alder_step_v78
+  store field(deref %frame, x0), %__alder_step_v76
+  store field(deref %frame, y0), %__alder_step_v75
+  %__alder_step_v79 = enum.construct @__alder_step.status, call
+  return %__alder_step_v79
+
+bb_resume_0:
+  %__alder_step_v68 = c.call.unsafe @alder_step_runtime.task_cancelled()
+  branch %__alder_step_v68, bb_cancel_resume_0, bb_join_0
+
+bb_join_0:
+  %__alder_step_v69 = load field(deref %frame, x0)
+  %__alder_step_v70 = load field(deref %frame, y0)
+  %__alder_step_v71 = load field(deref %__alder_step_v69, out)
+  %__alder_step_v72 = copy_to_domain %d, %__alder_step_v71
+  domain.destroy %__alder_step_v70
+  jump bb_after_0
+
+bb_after_0:
+  %__alder_step_v83 = load field(deref %frame, p0)
+  store local %x, %__alder_step_v72
+  %__alder_step_v84 = const.get @__alder_step_unit
+  store field(deref %frame, out), %__alder_step_v84
+  %__alder_step_v85 = enum.construct @__alder_step.status, done
+  return %__alder_step_v85
+
+bb_cancel_pre_0:
+  %__alder_step_v86 = enum.construct @__alder_step.status, cancelled
+  return %__alder_step_v86
+
+bb_cancel_resume_0:
+  %__alder_step_v87 = load field(deref %frame, y0)
+  domain.destroy %__alder_step_v87
+  %__alder_step_v88 = enum.construct @__alder_step.status, cancelled
+  return %__alder_step_v88
+
+bb_cancel_entry:
+  %__alder_step_v67 = enum.construct @__alder_step.status, cancelled
+  return %__alder_step_v67
+}
+
+fn @__alder_step.run.work13(%d: domain_handle, %frame: safe_mut(@__alder_step.frame.work13), %frame_owner: domain_handle) -> @__alder_step.status {
+  local %r: @Res15
+  local %held: @Res15
+  local %a: u64
+
+bb0:
+  %__alder_step_v97 = load field(deref %frame, state)
+  switch %__alder_step_v97 {
+    entry -> bb_entry
+    resume0 -> bb_resume_0
+    cleanup0 -> bb_cleanup_resume_0
+  }
+
+bb_entry:
+  %__alder_step_v98 = c.call.unsafe @alder_step_runtime.task_cancelled()
+  branch %__alder_step_v98, bb_cancel_entry, bb_entry_go
+
+bb_entry_go:
+  %__alder_step_v118 = load field(deref %frame, p0)
+  %__alder_step_v119 = load field(deref %frame, p1)
+  %__alder_step_v92 = aggregate.construct @Res15 { id: %__alder_step_v119 }
+  store local %r, %__alder_step_v92
+  %__alder_step_v93 = load local %r
+  store local %held, %__alder_step_v93
+  %__alder_step_v94 = cleanup.scope.begin
+  store field(deref %frame, s0), %__alder_step_v94
+  %__alder_step_v120 = load local %held
+  store field(deref %frame, l0), %__alder_step_v120
+  %__alder_step_v95 = cleanup.push %__alder_step_v94, @cleanup2, (%__alder_step_v93) place field(deref %frame, l0)
+  %__alder_step_v121 = c.call.unsafe @alder_step_runtime.task_cancelled()
+  branch %__alder_step_v121, bb_cancel_pre_0, bb_suspend_0
+
+bb_old_2:
+  %__alder_step_v122 = load field(deref %frame, p0)
+  %__alder_step_v123 = load field(deref %frame, p1)
+  panic
+
+bb_suspend_0:
+  %__alder_step_v108 = load field(deref %frame, p0)
+  %__alder_step_v109 = load field(deref %frame, p1)
+  %__alder_step_v110 = const.get @__alder_step_one
+  %__alder_step_v111 = domain.create %frame_owner
+  %__alder_step_v112 = alloc %__alder_step_v111, @__alder_step.frame.leaf11, %__alder_step_v110
+  %__alder_step_v113 = enum.construct @__alder_step.state.leaf11, entry
+  store field(deref %__alder_step_v112, state), %__alder_step_v113
+  store field(deref %__alder_step_v112, p0), %__alder_step_v108
+  store field(deref %__alder_step_v112, p1), %__alder_step_v109
+  %__alder_step_v114 = enum.construct @__alder_step.state.work13, resume0
+  store field(deref %frame, state), %__alder_step_v114
+  store field(deref %frame, x0), %__alder_step_v112
+  store field(deref %frame, y0), %__alder_step_v111
+  %__alder_step_v115 = load local %held
+  store field(deref %frame, l0), %__alder_step_v115
+  %__alder_step_v116 = load field(deref %frame, s0)
+  store field(deref %frame, s0), %__alder_step_v116
+  %__alder_step_v117 = enum.construct @__alder_step.status, call
+  return %__alder_step_v117
+
+bb_resume_0:
+  %__alder_step_v100 = c.call.unsafe @alder_step_runtime.task_cancelled()
+  branch %__alder_step_v100, bb_cancel_resume_0, bb_join_0
+
+bb_join_0:
+  %__alder_step_v101 = load field(deref %frame, x0)
+  %__alder_step_v102 = load field(deref %frame, y0)
+  %__alder_step_v103 = load field(deref %__alder_step_v101, out)
+  %__alder_step_v104 = copy_to_domain %d, %__alder_step_v103
+  domain.destroy %__alder_step_v102
+  %__alder_step_v105 = load field(deref %frame, l0)
+  store local %held, %__alder_step_v105
+  %__alder_step_v106 = load field(deref %frame, s0)
+  jump bb_after_0
+
+bb_after_0:
+  %__alder_step_v107 = cleanup.scope.begin
+  store field(deref %frame, s0), %__alder_step_v107
+  %__alder_step_v124 = load field(deref %frame, p0)
+  %__alder_step_v125 = load field(deref %frame, p1)
+  store local %a, %__alder_step_v104
+  %__alder_step_v96 = load local %a
+  %__alder_step_v132 = const.get @__alder_step_one
+  store field(deref %frame, v0), %__alder_step_v96
+  jump bb_cleanup_run_163
+
+bb_cancel_pre_0:
+  cleanup.scope.run %__alder_step_v94
+  cleanup.scope.end %__alder_step_v94
+  %__alder_step_v127 = enum.construct @__alder_step.status, cancelled
+  return %__alder_step_v127
+
+bb_cancel_resume_0:
+  %__alder_step_v128 = load field(deref %frame, y0)
+  domain.destroy %__alder_step_v128
+  %__alder_step_v129 = load field(deref %frame, s0)
+  cleanup.scope.run %__alder_step_v129
+  cleanup.scope.end %__alder_step_v129
+  %__alder_step_v130 = enum.construct @__alder_step.status, cancelled
+  return %__alder_step_v130
+
+bb_cancel_entry:
+  %__alder_step_v99 = enum.construct @__alder_step.status, cancelled
+  return %__alder_step_v99
+
+bb_cleanup_run_163:
+  cleanup.scope.run %__alder_step_v107
+  %__alder_step_v131 = const.get @__alder_step_false
+  branch %__alder_step_v131, bb_cleanup_after_163, bb_cleanup_after_163
+
+bb_cleanup_after_163:
+  cleanup.scope.end %__alder_step_v107
+  store field(deref %frame, out), %__alder_step_v96
+  %__alder_step_v126 = enum.construct @__alder_step.status, done
+  return %__alder_step_v126
+
+bb_cleanup_suspend_0:
+  %__alder_step_v133 = enum.construct @__alder_step.state.work13, cleanup0
+  store field(deref %frame, state), %__alder_step_v133
+  %__alder_step_v134 = const.get @__alder_step_one
+  %__alder_step_v135 = domain.create %frame_owner
+  %__alder_step_v136 = alloc %__alder_step_v135, @__alder_step.frame.cleanup2, %__alder_step_v134
+  store field(deref %frame, x1), %__alder_step_v136
+  store field(deref %frame, y1), %__alder_step_v135
+  %__alder_step_v137 = load field(deref %frame, v0)
+  store field(deref %frame, v0), %__alder_step_v137
+  %__alder_step_v138 = load field(deref %frame, s0)
+  store field(deref %frame, s0), %__alder_step_v138
+  %__alder_step_v139 = enum.construct @__alder_step.status, call
+  return %__alder_step_v139
+
+bb_cleanup_resume_0:
+  %__alder_step_v140 = load field(deref %frame, x1)
+  %__alder_step_v141 = load field(deref %frame, y1)
+  %__alder_step_v142 = load field(deref %frame, v0)
+  %__alder_step_v143 = load field(deref %frame, s0)
+  %__alder_step_v144 = c.call.unsafe @alder_step_runtime.task_cancelled()
+  branch %__alder_step_v144, bb_cleanup_cancel_0, bb_cleanup_after_0
+
+bb_cleanup_after_0:
+  domain.destroy %__alder_step_v141
+  store field(deref %frame, v0), %__alder_step_v142
+  %__alder_step_v145 = cleanup.scope.begin
+  store field(deref %frame, s0), %__alder_step_v145
+  cleanup.scope.run %__alder_step_v145
+  %__alder_step_v146 = const.get @__alder_step_false
+  branch %__alder_step_v146, bb_cleanup_suspend_0, bb_cleanup_finish_0
+
+bb_cleanup_finish_0:
+  cleanup.scope.end %__alder_step_v145
+  %__alder_step_v147 = load field(deref %frame, v0)
+  store field(deref %frame, out), %__alder_step_v147
+  %__alder_step_v148 = enum.construct @__alder_step.status, done
+  return %__alder_step_v148
+
+bb_cleanup_cancel_0:
+  domain.destroy %__alder_step_v141
+  %__alder_step_v149 = cleanup.scope.begin
+  store field(deref %frame, s0), %__alder_step_v149
+  cleanup.scope.run %__alder_step_v149
+  cleanup.scope.end %__alder_step_v149
+  %__alder_step_v150 = enum.construct @__alder_step.status, cancelled
+  return %__alder_step_v150
+}
+
+fn @__alder_step.run.main6(%d: domain_handle, %frame: safe_mut(@__alder_step.frame.main6), %frame_owner: domain_handle) -> @__alder_step.status {
+  local %block: @Blocking17
+  local %test: @TestIo16
+  local %a: u64
+  local %b: u64
+
+bb0:
+  %__alder_step_v170 = load field(deref %frame, state)
+  switch %__alder_step_v170 {
+    entry -> bb_entry
+    resume0 -> bb_resume_0
+  }
+
+bb_entry:
+  %__alder_step_v171 = c.call.unsafe @alder_step_runtime.task_cancelled()
+  branch %__alder_step_v171, bb_cancel_entry, bb_entry_go
+
+bb_entry_go:
+  %__alder_step_v154 = aggregate.construct @Blocking17 {  }
+  store local %block, %__alder_step_v154
+  %__alder_step_v155 = aggregate.construct @TestIo16 {  }
+  store local %test, %__alder_step_v155
+  %__alder_step_v156 = load local %block
+  %__alder_step_v157 = const.get @lit8
+  %__alder_step_v158 = call @work12(%__alder_step_v156, %__alder_step_v157)
+  store local %a, %__alder_step_v158
+  %__alder_step_v159 = load local %test
+  %__alder_step_v160 = const.get @lit11
+  %__alder_step_v186 = c.call.unsafe @alder_step_runtime.task_cancelled()
+  branch %__alder_step_v186, bb_cancel_pre_0, bb_suspend_0
+
+bb_old_2:
+  panic
+
+bb_old_3:
+  %__alder_step_v164 = const.get @lit16
+  store field(deref %frame, out), %__alder_step_v164
+  %__alder_step_v187 = enum.construct @__alder_step.status, done
+  return %__alder_step_v187
+
+bb_old_4:
+  jump bb_old_5
+
+bb_old_5:
+  %__alder_step_v165 = load local %a
+  %__alder_step_v166 = const.get @lit18
+  %__alder_step_v167 = int.ne %__alder_step_v165, %__alder_step_v166
+  branch %__alder_step_v167, bb_old_6, bb_old_7
+
+bb_old_6:
+  %__alder_step_v168 = const.get @lit20
+  store field(deref %frame, out), %__alder_step_v168
+  %__alder_step_v188 = enum.construct @__alder_step.status, done
+  return %__alder_step_v188
+
+bb_old_7:
+  jump bb_old_8
+
+bb_old_8:
+  %__alder_step_v169 = const.get @lit21
+  store field(deref %frame, out), %__alder_step_v169
+  %__alder_step_v189 = enum.construct @__alder_step.status, done
+  return %__alder_step_v189
+
+bb_suspend_0:
+  %__alder_step_v179 = const.get @__alder_step_one
+  %__alder_step_v180 = domain.create %frame_owner
+  %__alder_step_v181 = alloc %__alder_step_v180, @__alder_step.frame.work13, %__alder_step_v179
+  %__alder_step_v182 = enum.construct @__alder_step.state.work13, entry
+  store field(deref %__alder_step_v181, state), %__alder_step_v182
+  store field(deref %__alder_step_v181, p0), %__alder_step_v159
+  store field(deref %__alder_step_v181, p1), %__alder_step_v160
+  %__alder_step_v183 = enum.construct @__alder_step.state.main6, resume0
+  store field(deref %frame, state), %__alder_step_v183
+  store field(deref %frame, x0), %__alder_step_v181
+  store field(deref %frame, y0), %__alder_step_v180
+  %__alder_step_v184 = load local %a
+  store field(deref %frame, l0), %__alder_step_v184
+  %__alder_step_v185 = enum.construct @__alder_step.status, call
+  return %__alder_step_v185
+
+bb_resume_0:
+  %__alder_step_v173 = c.call.unsafe @alder_step_runtime.task_cancelled()
+  branch %__alder_step_v173, bb_cancel_resume_0, bb_join_0
+
+bb_join_0:
+  %__alder_step_v174 = load field(deref %frame, x0)
+  %__alder_step_v175 = load field(deref %frame, y0)
+  %__alder_step_v176 = load field(deref %__alder_step_v174, out)
+  %__alder_step_v177 = copy_to_domain %d, %__alder_step_v176
+  domain.destroy %__alder_step_v175
+  %__alder_step_v178 = load field(deref %frame, l0)
+  store local %a, %__alder_step_v178
+  jump bb_after_0
+
+bb_after_0:
+  store local %b, %__alder_step_v177
+  %__alder_step_v161 = load local %a
+  %__alder_step_v162 = load local %b
+  %__alder_step_v163 = int.ne %__alder_step_v161, %__alder_step_v162
+  branch %__alder_step_v163, bb_old_3, bb_old_4
+
+bb_cancel_pre_0:
+  %__alder_step_v190 = enum.construct @__alder_step.status, cancelled
+  return %__alder_step_v190
+
+bb_cancel_resume_0:
+  %__alder_step_v191 = load field(deref %frame, y0)
+  domain.destroy %__alder_step_v191
+  %__alder_step_v192 = enum.construct @__alder_step.status, cancelled
+  return %__alder_step_v192
+
+bb_cancel_entry:
+  %__alder_step_v172 = enum.construct @__alder_step.status, cancelled
+  return %__alder_step_v172
+}

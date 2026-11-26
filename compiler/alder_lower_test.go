@@ -31,6 +31,7 @@ func runLowerConformance(t *testing.T, exe string) {
 	t.Run("m9-step-many", func(t *testing.T) { runAlderStepManyLowerConformance(t, exe) })
 	t.Run("m9-step-branch", func(t *testing.T) { runAlderStepBranchLowerConformance(t, exe) })
 	t.Run("m9-step-cleanup", func(t *testing.T) { runAlderStepCleanupLowerConformance(t, exe) })
+	t.Run("m9-step-cleanup-cursor", func(t *testing.T) { runAlderStepCleanupCursorLowerConformance(t, exe) })
 	t.Run("m75-default-methods", func(t *testing.T) { runAlderDefaultMethodLowerBehavior(t, exe) })
 	t.Run("m75-mut-cursors", func(t *testing.T) { runAlderM75MutCursorLowerBehavior(t, exe) })
 	t.Run("m75-constrained-shapes", func(t *testing.T) { runAlderConstrainedShapesLowerBehavior(t, exe) })
