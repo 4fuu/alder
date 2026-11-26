@@ -495,3 +495,44 @@ bb0:
 `
 	mustReject(t, text, "return operand: expected c_int, got c_long")
 }
+
+// The frame contract admits exactly the cancellation observation and park
+// marker through the runtime namespace. The park module fixture covers the
+// full step shape; this test pins the binding-name boundary itself.
+func TestRuntimeBindingSpellingAllowlist(t *testing.T) {
+	const accepted = `mir 6
+
+const @zero: u64 = 0
+
+binding @runtime "alder.h" {
+  c_fn @park = "alder_task_park"() -> unit
+}
+
+fn @main() -> u64 {
+bb0:
+  c.call.unsafe @runtime.park()
+  %z = const.get @zero
+  return %z
+}
+`
+	if errs := Module(mustParse(t, accepted)); len(errs) != 0 {
+		t.Fatalf("park runtime binding rejected: %s", Errors(errs).String())
+	}
+
+	const rejected = `mir 6
+
+const @zero: u64 = 0
+
+binding @runtime "alder.h" {
+  c_fn @yield = "alder_task_yield"() -> unit
+}
+
+fn @main() -> u64 {
+bb0:
+  c.call.unsafe @runtime.yield()
+  %z = const.get @zero
+  return %z
+}
+`
+	mustReject(t, rejected, "C spelling must be a non-reserved C identifier")
+}

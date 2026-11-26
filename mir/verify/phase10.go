@@ -146,9 +146,9 @@ func validCExternalName(name string) bool {
 // underscore (implementation namespace), non-identifier characters, C
 // keywords, and the alder_-prefixed runtime namespace.
 func validCBindingName(name string) bool {
-	if name == "alder_task_cancelled" {
-		// The amended frame contract pins one runtime entry as a binding
-		// call target: the executor's cancellation observation.
+	if name == "alder_task_cancelled" || name == "alder_task_park" {
+		// The amended frame contract pins two runtime entries as binding
+		// call targets: cancellation observation and the park marker.
 		return true
 	}
 	if name == "" || name[0] == '_' {
