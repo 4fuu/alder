@@ -473,3 +473,24 @@ bb0:
 		t.Fatalf("round trip dropped noreturn attribute:\n%s", printed)
 	}
 }
+
+func TestParseRecursiveStepFrameType(t *testing.T) {
+	m, err := Parse("mir 6\ntype @__alder_step.frame.loop {\n  state: u64\n  x0: safe_mut(@__alder_step.frame.loop)\n  out: u64\n}\n")
+	if err != nil {
+		t.Fatalf("parse recursive step frame: %v", err)
+	}
+	id, ok := m.NamedType("__alder_step.frame.loop")
+	if !ok {
+		t.Fatal("recursive frame type not registered")
+	}
+	typ := m.Types[id].Fields[1].Type
+	if !m.ValidType(typ) || m.Types[typ].Kind != TypeSafeMut || m.Types[typ].Elem != id {
+		t.Fatalf("recursive frame field type = %+v, want safe_mut(self)", m.Types[typ])
+	}
+}
+
+func TestParseRecursiveUserAggregateRejected(t *testing.T) {
+	if _, err := Parse("mir 6\ntype @Loop {\n  next: safe_mut(@Loop)\n}\n"); err == nil || !strings.Contains(err.Error(), "unknown type @Loop") {
+		t.Fatalf("recursive user aggregate error = %v, want unknown type @Loop", err)
+	}
+}

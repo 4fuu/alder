@@ -390,10 +390,25 @@ func containsKindSeen(m *mir.Module, t mir.TypeId, kind mir.TypeKind, seen map[m
 // checkTypeCycle rejects any type that contains itself transitively, including
 // cycles that pass through anonymous structural types created through the API.
 func checkTypeCycle(m *mir.Module, root mir.TypeId, t *mir.Type) []Error {
+	// The safe_mut view of a reserved frame is the frame's self edge; the
+	// frame root carries the cycle verdict.
+	if t.Kind == mir.TypeSafeMut && m.ValidType(t.Elem) {
+		elem := &m.Types[t.Elem]
+		if elem.Kind == mir.TypeAggregate && strings.HasPrefix(elem.Name, frameTypePrefix) {
+			return nil
+		}
+	}
+	// A reserved step frame may name itself through safe_mut. That edge is a
+	// view into the frame's own activation storage, not a value-containment
+	// cycle, and the exception does not apply to user aggregates.
+	allowFrameSelf := t.Kind == mir.TypeAggregate && strings.HasPrefix(t.Name, frameTypePrefix)
 	seen := map[mir.TypeId]bool{root: true}
 	var walk func(id mir.TypeId) bool
 	walk = func(id mir.TypeId) bool {
 		if !m.ValidType(id) {
+			return false
+		}
+		if allowFrameSelf && m.Types[id].Kind == mir.TypeSafeMut && m.Types[id].Elem == root {
 			return false
 		}
 		if id == root {

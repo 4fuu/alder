@@ -58,6 +58,18 @@ fn mir_vpart_c_field_owner_ok(store: MirStore, owner: U64) -> Bool {
 }
 
 fn mir_vtype_cycles(d: Domain, store: MirStore, indexes: MirVIndexes, root: U64) -> Result(Bool, __s0_Error) {
+    if root >= 1 && root <= __s0_buffer_len(MirTypeRec, store.types) {
+        let root_type = __s0_buffer_get(MirTypeRec, store.types, root - 1)
+        if root_type.kind == mir_type_kind_safe_mut() && root_type.elem >= 1 && root_type.elem <= __s0_buffer_len(MirTypeRec, store.types) {
+            let elem = __s0_buffer_get(MirTypeRec, store.types, root_type.elem - 1)
+            if elem.kind == mir_type_kind_aggregate() && mir_vframe_prefix(store, elem.name_start, elem.name_end, mir_vframe_type_prefix()) { return Ok(false) }
+        }
+    }
+    var allow_frame_self = false
+    if root >= 1 && root <= __s0_buffer_len(MirTypeRec, store.types) {
+        let root_type = __s0_buffer_get(MirTypeRec, store.types, root - 1)
+        if root_type.kind == mir_type_kind_aggregate() && mir_vframe_prefix(store, root_type.name_start, root_type.name_end, mir_vframe_type_prefix()) { allow_frame_self = true }
+    }
     var work = try __s0_buffer_new(U64, d)
     work = try mir_vappend_type_children(d, store, indexes, work, root)
     let tcount = __s0_buffer_len(MirTypeRec, store.types)
@@ -69,9 +81,19 @@ fn mir_vtype_cycles(d: Domain, store: MirStore, indexes: MirVIndexes, root: U64)
     while at < __s0_buffer_len(U64, work) {
         let id = __s0_buffer_get(U64, work, at)
         if id == root { return Ok(true) }
-        if id >= 1 && id <= tcount && seen[id] == 0 {
-            seen[id] = 1
-            work = try mir_vappend_type_children(d, store, indexes, work, id)
+        if allow_frame_self && id >= 1 && id <= tcount {
+            let rec = __s0_buffer_get(MirTypeRec, store.types, id - 1)
+            if rec.kind == mir_type_kind_safe_mut() && rec.elem == root { } else {
+                if seen[id] == 0 {
+                    seen[id] = 1
+                    work = try mir_vappend_type_children(d, store, indexes, work, id)
+                }
+            }
+        } else {
+            if id >= 1 && id <= tcount && seen[id] == 0 {
+                seen[id] = 1
+                work = try mir_vappend_type_children(d, store, indexes, work, id)
+            }
         }
         at = at + 1
     }

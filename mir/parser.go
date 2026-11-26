@@ -197,6 +197,13 @@ func (p *parser) parseTypeDecl() error {
 	if err := p.expectPunct("{"); err != nil {
 		return err
 	}
+	// A reserved step frame is in scope inside its own declaration so a
+	// recursive instance can name its frame through safe_mut. The exception is
+	// deliberately limited to @__alder_step.frame.* aggregates.
+	self := NoType
+	if strings.HasPrefix(nameTok.text, "__alder_step.frame.") {
+		self = p.m.AddAggregate(nameTok.text, nil)
+	}
 	var fields []Field
 	for {
 		if p.peek().kind == tokPunct && p.peek().text == "}" {
@@ -215,6 +222,10 @@ func (p *parser) parseTypeDecl() error {
 			return err
 		}
 		fields = append(fields, Field{Name: nameTok.text, Type: typ})
+	}
+	if self != NoType {
+		p.m.Types[self].Fields = fields
+		return nil
 	}
 	p.m.AddAggregate(nameTok.text, fields)
 	return nil

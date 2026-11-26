@@ -99,3 +99,78 @@ pub fn main() -> I32 {
 	}
 	checkLowerGolden(t, "step-dual.mir", first)
 }
+
+func runAlderRecursiveStepLowerConformance(t *testing.T, exe string) {
+	t.Helper()
+	files := map[string]string{
+		"private.marker": "Map(\n",
+		"std/io.al": `module std.io
+
+pub trait Io {
+}
+
+pub trait BlockingIo {
+}
+
+pub trait AsyncIo {
+}
+
+pub type Blocking {
+}
+
+impl Io for Blocking {
+}
+
+impl BlockingIo for Blocking {
+}
+`,
+		"recursive.al": `module step.recursive
+
+import std.io { AsyncIo, Io }
+
+type TestIo {
+}
+
+impl Io for TestIo {
+}
+
+impl AsyncIo for TestIo {
+}
+
+fn down(I: type(Io), io: I, n: U64) -> U64 {
+    if n == 0 { return 0 }
+    return down(io, n - 1)
+}
+
+pub fn main() -> I32 {
+    let test = TestIo()
+    if down(test, 3) != 0 { return 1 }
+    return 0
+}
+`,
+	}
+	out := runLowerCompiler(t, exe, files, []string{"std/io.al", "recursive.al"})
+	module, err := mir.Parse(string(out))
+	if err != nil {
+		t.Fatalf("parse recursive step MIR: %v\n%s", err, out)
+	}
+	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+		t.Fatalf("verify recursive step MIR: %s\n%s", verify.Errors(diagnostics), out)
+	}
+	found := false
+	for i := range module.Types {
+		typ := &module.Types[i]
+		if !strings.HasPrefix(typ.Name, "__alder_step.frame.") {
+			continue
+		}
+		for _, field := range typ.Fields {
+			if module.ValidType(field.Type) && module.Types[field.Type].Kind == mir.TypeSafeMut && module.Types[field.Type].Elem == mir.TypeId(i) {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("recursive step MIR has no self-referential frame\n%s", out)
+	}
+	checkLowerGolden(t, "step-recursive.mir", out)
+}
