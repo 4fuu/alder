@@ -2375,7 +2375,12 @@ earlier gate. The representation family is fixed by
   value cannot observe an affine source before the source-scoped capability
   category and group-owned storage land. Transfer-category and
   portable-argument checking, lowering the task operations, group-exit
-  join/cancellation, and the token runtime remain gate 9.4 work.
+  join/cancellation, and the token runtime remain gate 9.4 work. Slice A
+  landed the MIR 7 `task.spawn` operation at `38cc0fa`: Go/Alder lockstep
+  parse/print/verify, the create-start-handle cgen lowering against the real
+  runtime, and the version convention (mir 7 only for modules containing the
+  operation). The Go oracle cgen does not yet synthesize CALL publication for
+  spawned steps; the Alder production cgen is complete.
 - **9.5 Channels, shared state, atomics, and timers** — `std.channel` FIFO,
   backpressure, close, and cancellation races; `std.sync` `Shared(T)`, guards,
   once, and barriers; `std.atomic` explicit memory orders; lock exclusion and
