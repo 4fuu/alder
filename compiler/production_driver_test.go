@@ -178,7 +178,7 @@ func writeProductionCompiler(dir, cc, root string, result *sharedProductionBuild
 	)
 	linkArgs = append(linkArgs, "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"))
 	linkArgs = append(linkArgs, objects...)
-	linkArgs = append(linkArgs, filepath.Join(root, "bootstrap", "alder_host.c"), filepath.Join(root, "runtime", "c", "alder.c"), "-o", result.exe)
+	linkArgs = append(linkArgs, filepath.Join(root, "bootstrap", "alder_host.c"), filepath.Join(root, "runtime", "c", "alder.c"), "-pthread", "-o", result.exe)
 	if output, commandErr := exec.Command(cc, linkArgs...).CombinedOutput(); commandErr != nil {
 		return fmt.Errorf("strict C11 link: %w\n%s", commandErr, output)
 	}
@@ -754,7 +754,7 @@ func buildRuntimeObject(t *testing.T, cc, root string) string {
 	object := filepath.Join(t.TempDir(), "alder.o")
 	args := strictC11Flags()
 	args = append(args, "-I", filepath.Join(root, "runtime", "c"),
-		"-c", filepath.Join(root, "runtime", "c", "alder.c"), "-o", object)
+		"-c", filepath.Join(root, "runtime", "c", "alder.c"), "-pthread", "-o", object)
 	if outputText, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("strict C11 compile of the runtime: %v\n%s", err, outputText)
 	}
@@ -774,7 +774,7 @@ func buildRuntimeObjectTesting(t *testing.T, cc, root string) string {
 	object := filepath.Join(t.TempDir(), "alder-testing.o")
 	args := strictC11Flags()
 	args = append(args, "-DALDER_RUNTIME_TESTING", "-I", filepath.Join(root, "runtime", "c"),
-		"-c", filepath.Join(root, "runtime", "c", "alder.c"), "-o", object)
+		"-c", filepath.Join(root, "runtime", "c", "alder.c"), "-pthread", "-o", object)
 	if outputText, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("strict C11 compile of the testing runtime: %v\n%s", err, outputText)
 	}
@@ -813,7 +813,7 @@ func linkGeneratedObjects(t *testing.T, cc, root string, objects []string, host,
 	args = append(args, extra...)
 	args = append(args, "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"))
 	args = append(args, objects...)
-	args = append(args, host, filepath.Join(root, "runtime", "c", "alder.c"), "-o", output)
+	args = append(args, host, filepath.Join(root, "runtime", "c", "alder.c"), "-pthread", "-o", output)
 	if outputText, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("strict C11 compile: %v\n%s", err, outputText)
 	}

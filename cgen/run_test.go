@@ -67,7 +67,7 @@ func runArgs(gen, driver, object string) []string {
 		"-I", filepath.Dir(gen),
 		"-I", "testdata/run",
 		"-I", filepath.Join("..", "runtime", "c"),
-		gen, driver, object,
+		gen, driver, object, "-pthread",
 	}
 }
 

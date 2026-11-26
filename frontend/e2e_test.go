@@ -123,7 +123,7 @@ func buildRuntimeObject(t *testing.T, cc string, extra ...string) string {
 	}, extra...)
 	args = append(args,
 		"-I", filepath.Join("..", "runtime", "c"),
-		"-c", filepath.Join("..", "runtime", "c", "alder.c"), "-o", object,
+		"-c", filepath.Join("..", "runtime", "c", "alder.c"), "-pthread", "-o", object,
 	)
 	if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("strict C11 compile of the runtime: %v\n%s", err, out)
@@ -183,7 +183,7 @@ func TestE2E(t *testing.T) {
 						"-I", filepath.Dir(genPath),
 						"-I", filepath.Join("..", "runtime", "c"),
 						genPath, driverPath, runtimeObject,
-						"-o", exe,
+						"-pthread", "-o", exe,
 					}
 					if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 						t.Fatalf("strict compile failed: %v\n%s", err, out)
@@ -229,7 +229,7 @@ int main(void) { return (int)alder_fn_main_%d(); }
 			"-I", filepath.Dir(genPath),
 			"-I", filepath.Join("..", "runtime", "c"),
 			genPath, driverPath, runtimeObject,
-			"-o", exe,
+			"-pthread", "-o", exe,
 		}
 		if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 			t.Fatalf("strict compile failed: %v\n%s", err, out)
@@ -355,7 +355,7 @@ fn main(d: Domain) -> I32 {
 						"-I", filepath.Dir(genPath),
 						"-I", filepath.Join("..", "runtime", "c"),
 						genPath, driverPath, runtimeObject,
-						"-o", exe,
+						"-pthread", "-o", exe,
 					}
 					if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 						t.Fatalf("strict compile failed: %v\n%s", err, out)
@@ -528,7 +528,7 @@ int main(void) {
 				"-I", filepath.Dir(genPath),
 				"-I", filepath.Join("..", "runtime", "c"),
 				genPath, driverPath, runtimeObject,
-				"-o", exe,
+				"-pthread", "-o", exe,
 			}
 			if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 				t.Fatalf("strict compile failed: %v\n%s", err, out)

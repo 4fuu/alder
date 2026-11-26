@@ -25,7 +25,7 @@ trap 'exit 143' TERM
 strict='-std=c11 -Wall -Wextra -Werror -pedantic -Wshadow -Wconversion'
 bootstrap_cflags=${BOOTSTRAP_CFLAGS-"-O2"}
 link_cflags=${BOOTSTRAP_CFLAGS-"-O2"}
-bootstrap_ldflags=${BOOTSTRAP_LDFLAGS:-}
+bootstrap_ldflags=${BOOTSTRAP_LDFLAGS:--pthread}
 host_flags=
 cache=false
 if [ "${ALDER_BOOTSTRAP_CACHE:-}" = "1" ]; then

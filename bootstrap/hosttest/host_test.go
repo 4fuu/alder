@@ -207,7 +207,7 @@ func compileNativeHost(t *testing.T) string {
 		`-DALDER_HOST_CC="` + cc + `"`,
 		`-DALDER_HOST_RUNTIME_C="` + filepath.Join(repo, "runtime", "c", "alder.c") + `"`,
 		`-DALDER_HOST_INCLUDE_DIR="` + filepath.Join(repo, "bootstrap") + `"`,
-		stub, filepath.Join(repo, "bootstrap", "alder_host.c"), "-o", exe}
+		stub, filepath.Join(repo, "bootstrap", "alder_host.c"), "-pthread", "-o", exe}
 	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("strict native host compile: %v\n%s", err, output)
 	}

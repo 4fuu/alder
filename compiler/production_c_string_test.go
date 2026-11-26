@@ -259,7 +259,7 @@ func TestM8CStringProductionQualification(t *testing.T) {
 		sanitize := []string{"-fsanitize=address,undefined", "-g", "-fno-omit-frame-pointer"}
 		args := append(append([]string{}, strictC11Flags()...), sanitize...)
 		args = append(args, "-I", dir, "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"),
-			sanitizedC, sanitizedDriver, filepath.Join(dir, "cstring.c"), filepath.Join(root, "runtime", "c", "alder.c"), "-lm", "-o", sanitizedExe)
+			sanitizedC, sanitizedDriver, filepath.Join(dir, "cstring.c"), filepath.Join(root, "runtime", "c", "alder.c"), "-lm", "-pthread", "-o", sanitizedExe)
 		if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 			t.Fatalf("sanitized c-string compile: %v\n%s", err, out)
 		}
