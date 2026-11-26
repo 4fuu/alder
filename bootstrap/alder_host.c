@@ -128,7 +128,7 @@ static struct AlderHostContext *alderhost_active_context;
 
 static bool alderhost_configure_stack(void) {
 #if defined(ALDER_HOST_LARGE_STACK) && defined(__linux__)
-    const rlim_t wanted = (rlim_t)UINT64_C(67108864);
+    const rlim_t wanted = (rlim_t)UINT64_C(268435456);
     struct rlimit limit;
     if (getrlimit(RLIMIT_STACK, &limit) != 0) {
         return false;

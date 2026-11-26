@@ -174,3 +174,157 @@ pub fn main() -> I32 {
 	}
 	checkLowerGolden(t, "step-recursive.mir", out)
 }
+
+func runAlderStepManyLowerConformance(t *testing.T, exe string) {
+	t.Helper()
+	files := map[string]string{
+		"private.marker": "Map(\n",
+		"std/io.al": `module std.io
+
+pub trait Io {
+}
+
+pub trait BlockingIo {
+}
+
+pub trait AsyncIo {
+}
+
+pub type Blocking {
+}
+
+impl Io for Blocking {
+}
+
+impl BlockingIo for Blocking {
+}
+`,
+		"many.al": `module step.many
+
+import std.io { AsyncIo, Blocking, Io }
+
+type TestIo {
+}
+
+impl Io for TestIo {
+}
+
+impl AsyncIo for TestIo {
+}
+
+fn leaf(I: type(Io), io: I, n: U64) -> U64 {
+    return n + 1
+}
+
+fn chain(I: type(Io), io: I, n: U64) -> U64 {
+    let a = leaf(io, n)
+    let b = leaf(io, a)
+    return leaf(io, b)
+}
+
+pub fn main() -> I32 {
+    let block = Blocking()
+    let test = TestIo()
+    let a = chain(block, 40)
+    let b = chain(test, 40)
+    if a != 43 { return 1 }
+    if b != a { return 2 }
+    return 0
+}
+`,
+	}
+	out := runLowerCompiler(t, exe, files, []string{"std/io.al", "many.al"})
+	module, err := mir.Parse(string(out))
+	if err != nil {
+		t.Fatalf("parse many-point step MIR: %v\n%s", err, out)
+	}
+	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+		t.Fatalf("verify many-point step MIR: %s\n%s", verify.Errors(diagnostics), out)
+	}
+	steps := 0
+	for _, function := range module.Functions {
+		if strings.HasPrefix(function.Name, "__alder_step.run.chain") {
+			steps++
+		}
+	}
+	if steps != 1 {
+		t.Fatalf("many-point MIR has %d chain step functions, want 1\n%s", steps, out)
+	}
+	checkLowerGolden(t, "step-many.mir", out)
+}
+
+func runAlderStepBranchLowerConformance(t *testing.T, exe string) {
+	t.Helper()
+	files := map[string]string{
+		"private.marker": "Map(\n",
+		"std/io.al": `module std.io
+
+pub trait Io {
+}
+
+pub trait BlockingIo {
+}
+
+pub trait AsyncIo {
+}
+
+pub type Blocking {
+}
+
+impl Io for Blocking {
+}
+
+impl BlockingIo for Blocking {
+}
+`,
+		"branch.al": `import std.io { AsyncIo, Blocking, Io }
+
+type TestIo {
+}
+
+impl Io for TestIo {
+}
+
+impl AsyncIo for TestIo {
+}
+
+fn leaf(I: type(Io), io: I, n: U64) -> U64 {
+    return n + 1
+}
+
+fn choose(I: type(Io), io: I, n: U64) -> U64 {
+    let a = leaf(io, n)
+    var x: U64 = 0
+    if a == 41 {
+        x = leaf(io, a)
+    } else {
+        x = leaf(io, a + 1)
+    }
+    return leaf(io, x)
+}
+
+pub fn main() -> I32 {
+    let block = Blocking()
+    let test = TestIo()
+    let a = choose(block, 40)
+    let b = choose(test, 40)
+    if a != b { return 1 }
+    if a != 43 { return 2 }
+    let c = choose(block, 39)
+    let d = choose(test, 39)
+    if c != d { return 3 }
+    if c != 43 { return 4 }
+    return 0
+}
+`,
+	}
+	out := runLowerCompiler(t, exe, files, []string{"std/io.al", "branch.al"})
+	module, err := mir.Parse(string(out))
+	if err != nil {
+		t.Fatalf("parse branch step MIR: %v\n%s", err, out)
+	}
+	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+		t.Fatalf("verify branch step MIR: %s\n%s", verify.Errors(diagnostics), out)
+	}
+	checkLowerGolden(t, "step-branch.mir", out)
+}

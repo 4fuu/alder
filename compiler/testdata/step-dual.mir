@@ -273,7 +273,7 @@ bb_entry_go:
   store local %test, %__alder_step_v74
   %__alder_step_v75 = load local %block
   %__alder_step_v76 = const.get @lit4
-  %__alder_step_v77 = call @leaf11(%__alder_step_v75, %__alder_step_v76)
+  %__alder_step_v77 = call @run9(%__alder_step_v75, %__alder_step_v76)
   store local %a, %__alder_step_v77
   %__alder_step_v78 = load local %test
   %__alder_step_v79 = const.get @lit7

@@ -87,6 +87,19 @@ fn cgen_term(store: MirStore, indexes: MirVIndexes, function: U64, block: U64) -
     return MirBuildStep(store: store, id: mir_vindex_term(indexes, function, block))
 }
 
+fn cgen_put_step_slot(d: Domain, writer: CgenWriter, store: MirStore, indexes: MirVIndexes, function: U64, instruction: U64, scope: Bool) -> Result(CgenWriter, __s0_Error) {
+    let step = cgen_step_index_for_function(store, function)
+    let rec = __s0_buffer_get(MirStepRec, store.steps, step - 1)
+    let frame_param = cgen_function_param(store, indexes, function, 1)
+    var out = try cgen_put(d, writer, "(*(( ")
+    out = try cgen_put_type(d, out, store, rec.frame)
+    out = try cgen_put(d, out, " *)")
+    out = try cgen_put_value_read(d, out, store, indexes, function, frame_param.value)
+    out = try cgen_put(d, out, ".data)).")
+    if scope { out = try cgen_put(d, out, "alder_scope_") } else { out = try cgen_put(d, out, "alder_domain_") }
+    return cgen_put_u64(d, out, instruction)
+}
+
 fn cgen_put_value(d: Domain, writer: CgenWriter, value: U64) -> Result(CgenWriter, __s0_Error) {
     var out = try cgen_put(d, writer, "alder_v")
     return cgen_put_u64(d, out, value - 1)
@@ -1556,6 +1569,18 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
         return Ok(out)
     }
     if item.op == mir_op_domain_create() {
+        let step = cgen_step_index_for_function(store, item.function)
+        if cgen_step_has_domain(store, step, instruction) {
+            out = try cgen_put(d, out, "  if (!alder_domain_init(&")
+            out = try cgen_put_step_slot(d, out, store, indexes, item.function, instruction, false)
+            out = try cgen_put(d, out, ", ")
+            out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+            out = try cgen_put(d, out, ")) \{ alder_runtime_panic(\"domain.create failed\"); }\n  ")
+            out = try cgen_put_value(d, out, item.result)
+            out = try cgen_put(d, out, " = &")
+            out = try cgen_put_step_slot(d, out, store, indexes, item.function, instruction, false)
+            return cgen_put(d, out, ";\n")
+        }
         out = try cgen_put(d, out, "  if (!alder_domain_init(&alder_domain_")
         out = try cgen_put_u64(d, out, instruction - 1)
         out = try cgen_put(d, out, ", ")
@@ -1612,6 +1637,13 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
         out = try cgen_put_tmp(d, out, item.result, "p")
         out = try cgen_put(d, out, " == NULL) ")
         if item.op == mir_op_alloc_checked() { out = try cgen_emit_checked_edge(d, out, store, indexes, instruction, item) } else { out = try cgen_put(d, out, "\{ alder_runtime_panic(\"alloc: out of memory\"); }") }
+        if cgen_step_index_for_frame(store, item.type_op) != 0 {
+            out = try cgen_put(d, out, "\n  memset(")
+            out = try cgen_put_tmp(d, out, item.result, "p")
+            out = try cgen_put(d, out, ", 0, sizeof(")
+            out = try cgen_put_type(d, out, store, item.type_op)
+            out = try cgen_put(d, out, "));")
+        }
         out = try cgen_put(d, out, "\n  ")
         out = try cgen_put_value(d, out, item.result)
         out = try cgen_put(d, out, " = (AlderSlice)\{ ")
@@ -1636,6 +1668,16 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
         return cgen_put(d, out, ";\n")
     }
     if item.op == mir_op_cleanup_scope_begin() {
+        let step = cgen_step_index_for_function(store, item.function)
+        if cgen_step_has_scope(store, step, instruction) {
+            out = try cgen_put(d, out, "  if (!alder_cleanup_scope_begin_adopting(&")
+            out = try cgen_put_step_slot(d, out, store, indexes, item.function, instruction, true)
+            out = try cgen_put(d, out, ")) \{ alder_runtime_panic(\"cleanup.scope.begin failed\"); }\n  ")
+            out = try cgen_put_value(d, out, item.result)
+            out = try cgen_put(d, out, " = &")
+            out = try cgen_put_step_slot(d, out, store, indexes, item.function, instruction, true)
+            return cgen_put(d, out, ";\n")
+        }
         out = try cgen_put(d, out, "  if (!alder_cleanup_scope_begin(&alder_scope_")
         out = try cgen_put_u64(d, out, instruction - 1)
         out = try cgen_put(d, out, ")) \{ alder_runtime_panic(\"cleanup.scope.begin failed\"); }\n  ")
@@ -2685,12 +2727,12 @@ fn cgen_emit_function_body(d: Domain, initial: CgenWriter, store: MirStore, inde
     var at: U64 = 0
     while at < __s0_buffer_len(MirInstrRec, store.instructions) {
         let instruction = __s0_buffer_get(MirInstrRec, store.instructions, at)
-        if instruction.function == function && instruction.op == mir_op_domain_create() {
+        if instruction.function == function && instruction.op == mir_op_domain_create() && !cgen_step_has_domain(store, cgen_step_index_for_function(store, function), at + 1) {
             out = try cgen_put(d, out, "  AlderDomain alder_domain_")
             out = try cgen_put_u64(d, out, at)
             out = try cgen_put(d, out, " = \{0};\n")
         }
-        if instruction.function == function && instruction.op == mir_op_cleanup_scope_begin() {
+        if instruction.function == function && instruction.op == mir_op_cleanup_scope_begin() && !cgen_step_has_scope(store, cgen_step_index_for_function(store, function), at + 1) {
             out = try cgen_put(d, out, "  AlderCleanupScope alder_scope_")
             out = try cgen_put_u64(d, out, at)
             out = try cgen_put(d, out, " = \{0};\n")

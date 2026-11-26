@@ -474,6 +474,33 @@ type MirOperandRec {
     name_end: U64
 }
 
+// Step lowering metadata is compiler-private and is not printed in MIR. It
+// binds a step function to its frame and records the state-indexed callee
+// publication table plus the frame-resident domain and cleanup sites. The
+// printed frame fields and state enum remain the inspectable representation.
+type MirStepCallRec {
+    resume: U64
+    kind: U64
+    x_field: U64
+    y_field: U64
+    callee: U64
+}
+
+type MirStepRec {
+    owner: U64
+    direct: U64
+    function: U64
+    frame: U64
+    state: U64
+    p_count: U64
+    first_call: U64
+    call_count: U64
+    first_domain: U64
+    domain_count: U64
+    first_scope: U64
+    scope_count: U64
+}
+
 type MirStore {
     names: __s0_Buffer(U8)
     types: __s0_Buffer(MirTypeRec)
@@ -492,6 +519,10 @@ type MirStore {
     bindings: __s0_Buffer(MirBindingRec)
     binding_funcs: __s0_Buffer(MirBindingFnRec)
     binding_consts: __s0_Buffer(MirBindingConstRec)
+    steps: __s0_Buffer(MirStepRec)
+    step_calls: __s0_Buffer(MirStepCallRec)
+    step_domains: __s0_Buffer(U64)
+    step_scopes: __s0_Buffer(U64)
 }
 
 type MirTypeStep {

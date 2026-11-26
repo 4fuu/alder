@@ -2482,7 +2482,7 @@ fn mir_vframe_scan(d: Domain, store: MirStore, indexes: MirVIndexes) -> Result(M
             let bad_table = try mir_vmemo_contains(d, store, indexes, field.type_id, mir_type_kind_table_view())
             let bad_mut_table = try mir_vmemo_contains(d, store, indexes, field.type_id, mir_type_kind_table_mut_view())
             let bad_scope = try mir_vmemo_contains(d, store, indexes, field.type_id, mir_type_kind_cleanup_scope())
-            if bad_table || bad_mut_table || (bad_scope && field.kind != mir_vframe_field_scope()) { out = try mir_vframe_diag(d, out, mir_vdiag_frame_field_kind(), 0, 0, 0, frame.type_id, field.ordinal) }
+            if bad_table || bad_mut_table || (bad_scope && field.kind != mir_vframe_field_scope() && field.kind != mir_vframe_field_callee()) { out = try mir_vframe_diag(d, out, mir_vdiag_frame_field_kind(), 0, 0, 0, frame.type_id, field.ordinal) }
             if field.kind != mir_vframe_field_callee() && field.kind != mir_vframe_field_state() && field.kind != mir_vframe_field_out() {
                 if try mir_vframe_type_contains(d, partial, store, indexes, field.type_id) { out = try mir_vframe_diag(d, out, mir_vdiag_frame_field_kind(), 0, 0, 0, frame.type_id, field.ordinal) }
             }

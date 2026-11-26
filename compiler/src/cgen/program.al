@@ -48,6 +48,80 @@ fn cgen_emit_function_name(d: Domain, initial: CgenWriter, store: MirStore, func
     return cgen_put_u64(d, out, function - 1)
 }
 
+fn cgen_put_step_name(d: Domain, initial: CgenWriter, store: MirStore, function: U64) -> Result(CgenWriter, __s0_Error) {
+    let item = __s0_buffer_get(MirFunctionRec, store.functions, function - 1)
+    var out = try cgen_put(d, initial, "alder_step_")
+    out = try cgen_put_name_fragment(d, out, store, item.name_start, item.name_end)
+    out = try cgen_put(d, out, "_")
+    return cgen_put_u64(d, out, function - 1)
+}
+
+fn cgen_emit_step_prototypes(d: Domain, initial: CgenWriter, store: MirStore) -> Result(CgenWriter, __s0_Error) {
+    var out = initial
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirStepRec, store.steps) {
+        let step = __s0_buffer_get(MirStepRec, store.steps, at)
+        out = try cgen_put(d, out, "static AlderStepStatus ")
+        out = try cgen_put_step_name(d, out, store, step.function)
+        out = try cgen_put(d, out, "(AlderTask *alder_task, AlderDomain *alder_results, void *alder_frame_ptr, AlderDomain *alder_frame_domain);\n")
+        at = at + 1
+    }
+    if __s0_buffer_len(MirStepRec, store.steps) > 0 { out = try cgen_put(d, out, "\n") }
+    return Ok(out)
+}
+
+fn cgen_emit_step_thunks(d: Domain, initial: CgenWriter, store: MirStore) -> Result(CgenWriter, __s0_Error) {
+    var out = initial
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirStepRec, store.steps) {
+        let step = __s0_buffer_get(MirStepRec, store.steps, at)
+        let function = __s0_buffer_get(MirFunctionRec, store.functions, step.function - 1)
+        out = try cgen_put(d, out, "static AlderStepStatus ")
+        out = try cgen_put_step_name(d, out, store, step.function)
+        out = try cgen_put(d, out, "(AlderTask *alder_task, AlderDomain *alder_results, void *alder_frame_ptr, AlderDomain *alder_frame_domain) \{\n  (void)alder_task;\n  ")
+        out = try cgen_put_type(d, out, store, function.result_type)
+        out = try cgen_put(d, out, " alder_status_value = ")
+        out = try cgen_emit_function_name(d, out, store, step.function)
+        out = try cgen_put(d, out, "(alder_results, (AlderSlice)\{alder_frame_ptr, UINT64_C(1)\}, alder_frame_domain);\n  AlderStepStatus alder_status = (AlderStepStatus)alder_status_value.alder_tag;\n  ")
+        out = try cgen_put_type(d, out, store, step.frame)
+        out = try cgen_put(d, out, " *alder_frame = (")
+        out = try cgen_put_type(d, out, store, step.frame)
+        out = try cgen_put(d, out, " *)alder_frame_ptr;\n  if (alder_status == ALDER_STEP_CALL) \{\n    switch (alder_frame->alder_f0.alder_tag) \{\n")
+        var call_at: U64 = 0
+        while call_at < step.call_count {
+            let call = __s0_buffer_get(MirStepCallRec, store.step_calls, step.first_call - 1 + call_at)
+            if call.kind == 1 {
+                out = try cgen_put(d, out, "    case ")
+                out = try cgen_put_u64(d, out, call.resume)
+                out = try cgen_put(d, out, ":\n      alder_task_call(alder_task, ")
+                out = try cgen_put_step_name(d, out, store, call.callee)
+                out = try cgen_put(d, out, ", alder_frame->alder_f")
+                out = try cgen_put_u64(d, out, call.x_field)
+                out = try cgen_put(d, out, ".data, alder_frame->alder_f")
+                out = try cgen_put_u64(d, out, call.y_field)
+                out = try cgen_put(d, out, ");\n      break;\n")
+            }
+            call_at = call_at + 1
+        }
+        out = try cgen_put(d, out, "    default:\n      alder_runtime_panic(\"step.call from a non-call state\");\n    \}\n  \}\n  return alder_status;\n\}\n\n")
+        at = at + 1
+    }
+    if __s0_buffer_len(MirStepRec, store.steps) > 0 {
+        at = 0
+        while at < __s0_buffer_len(MirStepRec, store.steps) {
+            let step = __s0_buffer_get(MirStepRec, store.steps, at)
+            out = try cgen_put(d, out, "static ALDER_MAYBE_UNUSED AlderStepFn alder_step_typecheck_")
+            out = try cgen_put_u64(d, out, step.function - 1)
+            out = try cgen_put(d, out, " = ")
+            out = try cgen_put_step_name(d, out, store, step.function)
+            out = try cgen_put(d, out, ";\n")
+            at = at + 1
+        }
+        out = try cgen_put(d, out, "\n")
+    }
+    return Ok(out)
+}
+
 fn cgen_emit_function_params(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, function: U64) -> Result(CgenWriter, __s0_Error) {
     var out = initial
     let count = cgen_function_param_count(store, indexes, function)
@@ -164,15 +238,20 @@ fn cgen_emit_bindings(d: Domain, initial: CgenWriter, store: MirStore) -> Result
     var block_at: U64 = 0
     while block_at < __s0_buffer_len(MirBindingRec, store.bindings) {
         let block = __s0_buffer_get(MirBindingRec, store.bindings, block_at)
-        out = try cgen_put(d, out, "#include <")
-        out = try cgen_put_name(d, out, store, block.header_start, block.header_end)
-        out = try cgen_put(d, out, ">\n")
+        if !mir_vname_word(store, block.name_start, block.name_end, "alder_step_runtime") {
+            out = try cgen_put(d, out, "#include <")
+            out = try cgen_put_name(d, out, store, block.header_start, block.header_end)
+            out = try cgen_put(d, out, ">\n")
+        }
         block_at = block_at + 1
     }
     out = try cgen_put(d, out, "#include <stddef.h>\n")
     block_at = 0
     while block_at < __s0_buffer_len(MirBindingRec, store.bindings) {
-        out = try cgen_emit_binding_checks(d, out, store, block_at)
+        let block = __s0_buffer_get(MirBindingRec, store.bindings, block_at)
+        if !mir_vname_word(store, block.name_start, block.name_end, "alder_step_runtime") {
+            out = try cgen_emit_binding_checks(d, out, store, block_at)
+        }
         block_at = block_at + 1
     }
     return cgen_put(d, out, "\n")
@@ -452,29 +531,37 @@ fn cgen_emit_binding_checks(d: Domain, initial: CgenWriter, store: MirStore, blo
 
 // Forward declarations for every binding-block C function, so generated
 // unsafe calls are always prototyped.
+fn cgen_binding_is_step_runtime(store: MirStore, block: U64) -> Bool {
+    if block == 0 || block > __s0_buffer_len(MirBindingRec, store.bindings) { return false }
+    let item = __s0_buffer_get(MirBindingRec, store.bindings, block - 1)
+    return mir_vname_word(store, item.name_start, item.name_end, "alder_step_runtime")
+}
+
 fn cgen_emit_binding_decls(d: Domain, initial: CgenWriter, store: MirStore) -> Result(CgenWriter, __s0_Error) {
     var out = initial
     var fn_at: U64 = 0
     while fn_at < __s0_buffer_len(MirBindingFnRec, store.binding_funcs) {
         let fn_rec = __s0_buffer_get(MirBindingFnRec, store.binding_funcs, fn_at)
-        if fn_rec.result_type == mir_type_unit() { out = try cgen_put(d, out, "void") } else { out = try cgen_put_type(d, out, store, fn_rec.result_type) }
-        out = try cgen_put(d, out, " ")
-        out = try cgen_put_name(d, out, store, fn_rec.c_name_start, fn_rec.c_name_end)
-        out = try cgen_put(d, out, "(")
-        let param_total = cgen_binding_param_count(store, fn_at + 1)
-        var pi: U64 = 0
-        var wrote = false
-        while pi < param_total {
-            let param_type = cgen_binding_param_type(store, fn_at + 1, pi)
-            if param_type != mir_type_unit() {
-                if wrote { out = try cgen_put(d, out, ", ") }
-                out = try cgen_put_type(d, out, store, param_type)
-                wrote = true
+        if !cgen_binding_is_step_runtime(store, fn_rec.block) {
+            if fn_rec.result_type == mir_type_unit() { out = try cgen_put(d, out, "void") } else { out = try cgen_put_type(d, out, store, fn_rec.result_type) }
+            out = try cgen_put(d, out, " ")
+            out = try cgen_put_name(d, out, store, fn_rec.c_name_start, fn_rec.c_name_end)
+            out = try cgen_put(d, out, "(")
+            let param_total = cgen_binding_param_count(store, fn_at + 1)
+            var pi: U64 = 0
+            var wrote = false
+            while pi < param_total {
+                let param_type = cgen_binding_param_type(store, fn_at + 1, pi)
+                if param_type != mir_type_unit() {
+                    if wrote { out = try cgen_put(d, out, ", ") }
+                    out = try cgen_put_type(d, out, store, param_type)
+                    wrote = true
+                }
+                pi = pi + 1
             }
-            pi = pi + 1
+            if !wrote { out = try cgen_put(d, out, "void") }
+            out = try cgen_put(d, out, ");\n")
         }
-        if !wrote { out = try cgen_put(d, out, "void") }
-        out = try cgen_put(d, out, ");\n")
         fn_at = fn_at + 1
     }
     if __s0_buffer_len(MirBindingFnRec, store.binding_funcs) > 0 { out = try cgen_put(d, out, "\n") }
@@ -556,17 +643,48 @@ fn cgen_emit_functions(d: Domain, initial: CgenWriter, store: MirStore, indexes:
     return Ok(out)
 }
 
+fn cgen_step_index_for_direct(store: MirStore, direct: U64) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirStepRec, store.steps) {
+        if __s0_buffer_get(MirStepRec, store.steps, at).direct == direct { return at + 1 }
+        at = at + 1
+    }
+    return 0
+}
+
 fn cgen_emit_host_entry(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, main: U64) -> Result(CgenWriter, __s0_Error) {
     var out = try cgen_put(d, initial, "int32_t alder_program_entry(void *host_context) \{\n  if (host_context == NULL) \{ return ALDER_PROGRAM_FAILURE_STATUS; }\n")
-    let count = cgen_function_param_count(store, indexes, main)
-    if count == 0 {
-        out = try cgen_put(d, out, "  return ")
-        out = try cgen_emit_function_name(d, out, store, main)
-        out = try cgen_put(d, out, "();\n")
+    let step_index = cgen_step_index_for_direct(store, main)
+    if step_index != 0 && __s0_buffer_get(MirStepRec, store.steps, step_index - 1).p_count == 0 {
+        let step = __s0_buffer_get(MirStepRec, store.steps, step_index - 1)
+        let frame_fields = mir_type_part_count(store, step.frame, mir_type_part_field())
+        out = try cgen_put(d, out, "  AlderDomain alder_root = \{0};\n  if (!alder_domain_init(&alder_root, NULL)) \{ return ALDER_PROGRAM_FAILURE_STATUS; }\n  ")
+        out = try cgen_put_type(d, out, store, step.frame)
+        out = try cgen_put(d, out, " *alder_frame = (")
+        out = try cgen_put_type(d, out, store, step.frame)
+        out = try cgen_put(d, out, " *)alder_domain_alloc(&alder_root, sizeof(")
+        out = try cgen_put_type(d, out, store, step.frame)
+        out = try cgen_put(d, out, "), _Alignof(")
+        out = try cgen_put_type(d, out, store, step.frame)
+        out = try cgen_put(d, out, "));\n  if (alder_frame == NULL) \{ alder_domain_destroy(&alder_root); return ALDER_PROGRAM_FAILURE_STATUS; }\n  memset(alder_frame, 0, sizeof *alder_frame);\n  alder_frame->alder_f0 = (")
+        let state_type = __s0_buffer_get(MirTypeRec, store.types, step.state - 1)
+        out = try cgen_put_type(d, out, store, step.state)
+        out = try cgen_put(d, out, ")\{0};\n  AlderTask *alder_task = alder_task_create(UINT64_C(0), ")
+        out = try cgen_put_step_name(d, out, store, step.function)
+        out = try cgen_put(d, out, ", alder_frame, &alder_root);\n  if (alder_task == NULL) \{ alder_domain_destroy(&alder_root); return ALDER_PROGRAM_FAILURE_STATUS; }\n  uint64_t alder_task_id = alder_task_handle(alder_task);\n  alder_task_start(alder_task);\n  if (!alder_executor_run(NULL)) \{ return ALDER_PROGRAM_FAILURE_STATUS; }\n  int32_t alder_result = (int32_t)alder_frame->alder_f")
+        out = try cgen_put_u64(d, out, frame_fields - 1)
+        out = try cgen_put(d, out, ";\n  alder_task_release(alder_task_id);\n  alder_domain_destroy(&alder_root);\n  return alder_result;\n")
     } else {
-        out = try cgen_put(d, out, "  AlderDomain alder_root = \{0};\n  int32_t alder_status;\n  if (!alder_domain_init(&alder_root, NULL)) \{ return ALDER_PROGRAM_FAILURE_STATUS; }\n  alder_status = ")
-        out = try cgen_emit_function_name(d, out, store, main)
-        out = try cgen_put(d, out, "(&alder_root);\n  alder_domain_destroy(&alder_root);\n  return alder_status;\n")
+        let count = cgen_function_param_count(store, indexes, main)
+        if count == 0 {
+            out = try cgen_put(d, out, "  return ")
+            out = try cgen_emit_function_name(d, out, store, main)
+            out = try cgen_put(d, out, "();\n")
+        } else {
+            out = try cgen_put(d, out, "  AlderDomain alder_root = \{0};\n  int32_t alder_status;\n  if (!alder_domain_init(&alder_root, NULL)) \{ return ALDER_PROGRAM_FAILURE_STATUS; }\n  alder_status = ")
+            out = try cgen_emit_function_name(d, out, store, main)
+            out = try cgen_put(d, out, "(&alder_root);\n  alder_domain_destroy(&alder_root);\n  return alder_status;\n")
+        }
     }
     return cgen_put(d, out, "}\n")
 }
@@ -939,6 +1057,7 @@ fn cgen_build_declaration_skeleton(d: Domain, store: MirStore, verified: MirVeri
     out = try cgen_emit_types(d, out, store)
     out = try cgen_emit_constants(d, out, store)
     out = try cgen_emit_functions(d, out, store, indexes)
+    out = try cgen_emit_step_prototypes(d, out, store)
     out = try cgen_emit_imports(d, out, store)
     out = try cgen_emit_binding_decls(d, out, store)
     if verified.hosted { out = try cgen_emit_host_entry(d, out, store, indexes, verified.entry) }
@@ -1434,6 +1553,7 @@ fn cgen_build(d: Domain, store: MirStore, indexes: MirVIndexes, verified: MirVer
     out = try cgen_emit_types(d, out, store)
     out = try cgen_emit_constants(d, out, store)
     out = try cgen_emit_functions(d, out, store, indexes)
+    out = try cgen_emit_step_prototypes(d, out, store)
     out = try cgen_emit_imports(d, out, store)
     out = try cgen_emit_binding_decls(d, out, store)
     out = try cgen_emit_cleanup_sites(d, out, store, indexes)
@@ -1444,6 +1564,7 @@ fn cgen_build(d: Domain, store: MirStore, indexes: MirVIndexes, verified: MirVer
     out = try cgen_emit_callback_owner_releases(d, out, store)
     out = try cgen_emit_callback_trampolines(d, out, store, indexes)
     out = try cgen_emit_bodies(d, out, store)
+    out = try cgen_emit_step_thunks(d, out, store)
     out = try cgen_emit_exports(d, out, store, indexes)
     if verified.hosted { out = try cgen_emit_host_entry(d, out, store, indexes, verified.entry) }
     return Ok(out)

@@ -91,10 +91,60 @@ fn cgen_type_part(store: MirStore, owner: U64, kind: U64, ordinal: U64) -> MirTy
     return __s0_buffer_get(MirTypePartRec, store.type_parts, 0)
 }
 
+fn cgen_step_index_for_frame(store: MirStore, frame: U64) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirStepRec, store.steps) {
+        if __s0_buffer_get(MirStepRec, store.steps, at).frame == frame { return at + 1 }
+        at = at + 1
+    }
+    return 0
+}
+
+fn cgen_step_index_for_function(store: MirStore, function: U64) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirStepRec, store.steps) {
+        if __s0_buffer_get(MirStepRec, store.steps, at).function == function { return at + 1 }
+        at = at + 1
+    }
+    return 0
+}
+
+fn cgen_step_index_for_owner(store: MirStore, owner: U64) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirStepRec, store.steps) {
+        if __s0_buffer_get(MirStepRec, store.steps, at).owner == owner { return at + 1 }
+        at = at + 1
+    }
+    return 0
+}
+
+fn cgen_step_has_domain(store: MirStore, step: U64, instruction: U64) -> Bool {
+    if step == 0 { return false }
+    let rec = __s0_buffer_get(MirStepRec, store.steps, step - 1)
+    var at: U64 = 0
+    while at < rec.domain_count {
+        if __s0_buffer_get(U64, store.step_domains, rec.first_domain - 1 + at) == instruction { return true }
+        at = at + 1
+    }
+    return false
+}
+
+fn cgen_step_has_scope(store: MirStore, step: U64, instruction: U64) -> Bool {
+    if step == 0 { return false }
+    let rec = __s0_buffer_get(MirStepRec, store.steps, step - 1)
+    var at: U64 = 0
+    while at < rec.scope_count {
+        if __s0_buffer_get(U64, store.step_scopes, rec.first_scope - 1 + at) == instruction { return true }
+        at = at + 1
+    }
+    return false
+}
+
 fn cgen_emit_type(d: Domain, initial: CgenTypeState, store: MirStore, id: U64) -> Result(CgenTypeState, __s0_Error) {
     if id <= mir_primitive_type_count() || cgen_emitted(initial.emitted, id) { return Ok(initial) }
     var state = initial
     let t = __s0_buffer_get(MirTypeRec, store.types, id - 1)
+    if t.kind == mir_type_kind_safe_mut() && (t.elem == id || cgen_step_index_for_frame(store, t.elem) != 0) { return Ok(initial) }
     if t.kind == mir_type_kind_aggregate() || t.kind == mir_type_kind_enum() {
         var ordinal: U64 = 0
         var kind = mir_type_part_variant()
@@ -186,6 +236,24 @@ fn cgen_emit_struct(d: Domain, initial: CgenWriter, store: MirStore, id: U64, t:
             out = try cgen_put_u64(d, out, ordinal)
             out = try cgen_put(d, out, ";\n")
             ordinal = ordinal + 1
+        }
+        let step = cgen_step_index_for_frame(store, id)
+        if step != 0 {
+            let step_rec = __s0_buffer_get(MirStepRec, store.steps, step - 1)
+            var site: U64 = 0
+            while site < step_rec.domain_count {
+                out = try cgen_put(d, out, "  AlderDomain alder_domain_")
+                out = try cgen_put_u64(d, out, __s0_buffer_get(U64, store.step_domains, step_rec.first_domain - 1 + site))
+                out = try cgen_put(d, out, ";\n")
+                site = site + 1
+            }
+            site = 0
+            while site < step_rec.scope_count {
+                out = try cgen_put(d, out, "  AlderCleanupScope alder_scope_")
+                out = try cgen_put_u64(d, out, __s0_buffer_get(U64, store.step_scopes, step_rec.first_scope - 1 + site))
+                out = try cgen_put(d, out, ";\n")
+                site = site + 1
+            }
         }
     } else {
         var payloads: U64 = 0

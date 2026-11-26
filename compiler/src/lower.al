@@ -9578,11 +9578,10 @@ fn lower_checked(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanR
 // capabilities are all BlockingIo never reaches this pass because its
 // signature and its callees are direct.
 //
-// The splitter supports one suspension point per instance. A function with a
-// suspending signature and no suspension point lowers to a one-state step.
-// Functions with more than one suspension point keep the direct lowering and
-// are reported as the remaining 9.3 work; this keeps every existing accepted
-// program compiling while the multi-point and park paths are built out.
+// A function with a suspending signature and no suspension point lowers to a
+// one-state step. Instances with one or more suspension points lower through
+// the canonical suspend/resume shape; state variants are numbered in source
+// order and the frame planner unions the per-point save sets.
 // ---------------------------------------------------------------------------
 
 type LowerStepProbeRec {
@@ -9633,6 +9632,19 @@ type LowerStepLayoutRec {
     s_count: U64
 }
 
+type LowerStepSaveRec {
+    kind: U64
+    value: U64
+    pos: U64
+}
+
+type LowerStepPointSaveRec {
+    first: U64
+    count: U64
+    x_pos: U64
+    y_pos: U64
+}
+
 type LowerStepLayoutsRec {
     state: LowerState
     layouts: __s0_Buffer(LowerStepLayoutRec)
@@ -9642,6 +9654,8 @@ type LowerStepLayoutsRec {
     v_values: __s0_Buffer(U64)
     c_values: __s0_Buffer(U64)
     s_values: __s0_Buffer(U64)
+    saves: __s0_Buffer(LowerStepSaveRec)
+    point_saves: __s0_Buffer(LowerStepPointSaveRec)
     status: U64
     one_name: __s0_String
     unit_name: __s0_String
@@ -10536,6 +10550,24 @@ fn lower_step_sort_by_def(d: Domain, store: MirStore, function: U64, items: __s0
     return Ok(items)
 }
 
+fn lower_step_sort_u64(items: __s0_Buffer(U64), start: U64, count: U64) -> __s0_Buffer(U64) {
+    var at: U64 = 1
+    while at < count {
+        var current = __s0_buffer_get(U64, items, start + at)
+        var pos = at
+        while pos > 0 {
+            let prior = __s0_buffer_get(U64, items, start + pos - 1)
+            if prior <= current { pos = 0 } else {
+                __s0_buffer_set(U64, items, start + pos, prior)
+                __s0_buffer_set(U64, items, start + pos - 1, current)
+                pos = pos - 1
+            }
+        }
+        at = at + 1
+    }
+    return items
+}
+
 fn lower_step_intern_kind(d: Domain, state: LowerState, kind: U64) -> Result(MirTypeStep, __s0_Error) {
     let empty = try __s0_buffer_new(U64, d)
     return mir_intern_type(d, state.mir, kind, 0, 0, 0, empty, 0)
@@ -10555,7 +10587,6 @@ fn lower_step_owner_supported(d: Domain, source_state: State, spans: __s0_Buffer
     let symbol = __s0_buffer_get(SymbolRec, store.symbols, owner - 1)
     if symbol.c_export || lower_closure_site_for(store, owner) != 0 { return Ok(false) }
     let points = try lower_step_points(d, spans, store, flags, owner)
-    if __s0_buffer_len(LowerStepPointRec, points) > 1 { return Ok(false) }
     let function = lower_owner_lookup(state.owners, owner)
     if function == 0 { return Ok(false) }
     if __s0_buffer_len(LowerStepPointRec, points) == 1 {
@@ -10653,9 +10684,11 @@ fn lower_step_types(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
             if lower_step_flat_get(flags, 0, owner - 1) && !lower_step_flat_get(emitted, 0, owner - 1) && picked == 0 {
                 let points = try lower_step_points(d, spans, store, flags, owner)
                 var ready = true
-                if __s0_buffer_len(LowerStepPointRec, points) == 1 {
-                    let callee = __s0_buffer_get(LowerStepPointRec, points, 0).callee
+                var point_at: U64 = 0
+                while point_at < __s0_buffer_len(LowerStepPointRec, points) {
+                    let callee = __s0_buffer_get(LowerStepPointRec, points, point_at).callee
                     if callee != owner && callee >= 1 && callee <= symbol_count && lower_step_flat_get(flags, 0, callee - 1) && !lower_step_flat_get(emitted, 0, callee - 1) { ready = false }
+                    point_at = point_at + 1
                 }
                 if ready { picked = owner }
             }
@@ -10726,9 +10759,15 @@ fn lower_step_frames(d: Domain, source_state: State, store: CheckStore, flags: _
         }
         let domain = try lower_step_intern_kind(d, state, mir_type_kind_domain_handle())
         state = lower_with_mir(state, domain.store)
-        var pi: U64 = 0
-        while pi < layout.point_count {
-            let point = __s0_buffer_get(LowerStepPointRec, layouts.points, layout.first_point - 1 + pi)
+        let save_base = __s0_buffer_len(LowerStepPointSaveRec, layouts.point_saves) + 1
+        var placeholder: U64 = 0
+        while placeholder < layout.point_count {
+            layouts.point_saves = try __s0_buffer_append(LowerStepPointSaveRec, d, layouts.point_saves, LowerStepPointSaveRec(first: 0, count: 0, x_pos: 0, y_pos: 0))
+            placeholder = placeholder + 1
+        }
+        var xy: U64 = 0
+        while xy < layout.point_count {
+            let point = __s0_buffer_get(LowerStepPointRec, layouts.points, layout.first_point - 1 + xy)
             let callee = lower_step_layout_for(layouts.layouts, point.callee)
             if callee == 0 { state = lower_invalid(state)
                 return Ok(layouts) }
@@ -10736,11 +10775,14 @@ fn lower_step_frames(d: Domain, source_state: State, store: CheckStore, flags: _
             let empty = try __s0_buffer_new(U64, d)
             let reference = try mir_intern_type(d, state.mir, mir_type_kind_safe_mut(), callee_layout.frame, 0, 0, empty, 0)
             state = lower_with_mir(state, reference.store)
-            state = try lower_step_add_field(d, state, layout.frame, ordinal, try lower_decimal_name(d, "x", pi), reference.type_id)
+            let x_pos = ordinal
+            state = try lower_step_add_field(d, state, layout.frame, ordinal, try lower_decimal_name(d, "x", xy), reference.type_id)
             ordinal = ordinal + 1
-            state = try lower_step_add_field(d, state, layout.frame, ordinal, try lower_decimal_name(d, "y", pi), domain.type_id)
+            let y_pos = ordinal
+            state = try lower_step_add_field(d, state, layout.frame, ordinal, try lower_decimal_name(d, "y", xy), domain.type_id)
             ordinal = ordinal + 1
-            pi = pi + 1
+            __s0_buffer_set(LowerStepPointSaveRec, layouts.point_saves, save_base - 1 + xy, LowerStepPointSaveRec(first: 0, count: 0, x_pos: x_pos, y_pos: y_pos))
+            xy = xy + 1
         }
         let cleanup_id = try lower_step_intern_kind(d, state, mir_type_kind_cleanup_id())
         state = lower_with_mir(state, cleanup_id.store)
@@ -10751,13 +10793,20 @@ fn lower_step_frames(d: Domain, source_state: State, store: CheckStore, flags: _
         let v_first = __s0_buffer_len(U64, layouts.v_values) + 1
         let c_first = __s0_buffer_len(U64, layouts.c_values) + 1
         let s_first = __s0_buffer_len(U64, layouts.s_values) + 1
-        if layout.point_count == 1 {
-            let point = __s0_buffer_get(LowerStepPointRec, layouts.points, layout.first_point - 1)
+        let indexes = try mir_vindex_build(d, state.mir)
+        let cfg = try lower_step_cfg_build(d, state.mir, indexes, function)
+        let vstride = cfg.value_count + 1
+        let lstride = cfg.local_count + 1
+        var vflags = try lower_step_zero_map(d, layout.point_count * vstride)
+        var lflags = try lower_step_zero_map(d, layout.point_count * lstride)
+        var seen_v = try lower_step_zero_map(d, vstride)
+        var seen_l = try lower_step_zero_map(d, lstride)
+        var pi: U64 = 0
+        while pi < layout.point_count {
+            let point = __s0_buffer_get(LowerStepPointRec, layouts.points, layout.first_point - 1 + pi)
             let instruction = lower_step_point_instruction(state, owner, point.expression)
             if instruction == 0 { state = lower_invalid(state)
                 return Ok(layouts) }
-            let indexes = try mir_vindex_build(d, state.mir)
-            let cfg = try lower_step_cfg_build(d, state.mir, indexes, function)
             let live_values = try lower_step_value_live_after(d, state.mir, indexes, cfg, function, instruction)
             let live_locals = try lower_step_local_live_after(d, state.mir, indexes, cfg, function, instruction)
             let call = lower_step_instr_by_id(state.mir, instruction)
@@ -10765,14 +10814,18 @@ fn lower_step_frames(d: Domain, source_state: State, store: CheckStore, flags: _
             while value_ordinal < cfg.value_count {
                 let value = lower_step_value_by_ordinal(state.mir, function, value_ordinal)
                 if value.function == function && value.def_kind != mir_value_def_function_param() && value.value_type != mir_type_unit() && value.ordinal + 1 != call.result && lower_step_flat_get(live_values, 0, value.ordinal) && lower_step_instruction_available(cfg, value, call.block, call.ordinal) {
-                    let kind = mir_vtype_kind(state.mir, value.value_type)
-                    if kind == mir_type_kind_cleanup_id() { layouts.c_values = try __s0_buffer_append(U64, d, layouts.c_values, value.ordinal + 1) } else {
-                    if kind == mir_type_kind_cleanup_scope() { layouts.s_values = try __s0_buffer_append(U64, d, layouts.s_values, value.ordinal + 1) } else {
-                    if kind == mir_type_kind_domain_handle() {
-                        let def = lower_step_def_instruction(state.mir, function, value)
-                        let def_item = lower_step_instr_by_id(state.mir, def)
-                        if def_item.op == mir_op_domain_create() { layouts.d_values = try __s0_buffer_append(U64, d, layouts.d_values, value.ordinal + 1) } else { layouts.v_values = try __s0_buffer_append(U64, d, layouts.v_values, value.ordinal + 1) }
-                    } else { layouts.v_values = try __s0_buffer_append(U64, d, layouts.v_values, value.ordinal + 1) } } }
+                    if __s0_buffer_get(U64, seen_v, value.ordinal) == 0 {
+                        __s0_buffer_set(U64, seen_v, value.ordinal, 1)
+                        let kind = mir_vtype_kind(state.mir, value.value_type)
+                        if kind == mir_type_kind_cleanup_id() { layouts.c_values = try __s0_buffer_append(U64, d, layouts.c_values, value.ordinal + 1) } else {
+                        if kind == mir_type_kind_cleanup_scope() { layouts.s_values = try __s0_buffer_append(U64, d, layouts.s_values, value.ordinal + 1) } else {
+                        if kind == mir_type_kind_domain_handle() {
+                            let def = lower_step_def_instruction(state.mir, function, value)
+                            let def_item = lower_step_instr_by_id(state.mir, def)
+                            if def_item.op == mir_op_domain_create() { layouts.d_values = try __s0_buffer_append(U64, d, layouts.d_values, value.ordinal + 1) } else { layouts.v_values = try __s0_buffer_append(U64, d, layouts.v_values, value.ordinal + 1) }
+                        } else { layouts.v_values = try __s0_buffer_append(U64, d, layouts.v_values, value.ordinal + 1) } } }
+                    }
+                    __s0_buffer_set(U64, vflags, pi * vstride + value.ordinal, 1)
                 }
                 value_ordinal = value_ordinal + 1
             }
@@ -10780,14 +10833,21 @@ fn lower_step_frames(d: Domain, source_state: State, store: CheckStore, flags: _
             while local_ordinal < cfg.local_count {
                 let local = lower_step_local_by_ordinal(state.mir, function, local_ordinal)
                 if local.function == function && local.local_type != mir_type_unit() && lower_step_flat_get(live_locals, 0, local.ordinal) && lower_step_local_initialized(state.mir, indexes, cfg, function, local.ordinal + 1, call.block, call.ordinal) {
-                    layouts.l_locals = try __s0_buffer_append(U64, d, layouts.l_locals, local.ordinal + 1)
+                    if __s0_buffer_get(U64, seen_l, local.ordinal) == 0 {
+                        __s0_buffer_set(U64, seen_l, local.ordinal, 1)
+                        layouts.l_locals = try __s0_buffer_append(U64, d, layouts.l_locals, local.ordinal + 1)
+                    }
+                    __s0_buffer_set(U64, lflags, pi * lstride + local.ordinal, 1)
                 }
                 local_ordinal = local_ordinal + 1
             }
-            layouts.d_values = try lower_step_sort_by_def(d, state.mir, function, layouts.d_values, d_first - 1, __s0_buffer_len(U64, layouts.d_values) - (d_first - 1))
-            layouts.c_values = try lower_step_sort_by_def(d, state.mir, function, layouts.c_values, c_first - 1, __s0_buffer_len(U64, layouts.c_values) - (c_first - 1))
-            layouts.s_values = try lower_step_sort_by_def(d, state.mir, function, layouts.s_values, s_first - 1, __s0_buffer_len(U64, layouts.s_values) - (s_first - 1))
+            pi = pi + 1
         }
+        layouts.d_values = try lower_step_sort_by_def(d, state.mir, function, layouts.d_values, d_first - 1, __s0_buffer_len(U64, layouts.d_values) - (d_first - 1))
+        layouts.c_values = try lower_step_sort_by_def(d, state.mir, function, layouts.c_values, c_first - 1, __s0_buffer_len(U64, layouts.c_values) - (c_first - 1))
+        layouts.s_values = try lower_step_sort_by_def(d, state.mir, function, layouts.s_values, s_first - 1, __s0_buffer_len(U64, layouts.s_values) - (s_first - 1))
+        layouts.l_locals = lower_step_sort_u64(layouts.l_locals, l_first - 1, __s0_buffer_len(U64, layouts.l_locals) - (l_first - 1))
+        layouts.v_values = lower_step_sort_u64(layouts.v_values, v_first - 1, __s0_buffer_len(U64, layouts.v_values) - (v_first - 1))
         layout.first_d = d_first
         layout.d_count = __s0_buffer_len(U64, layouts.d_values) - (d_first - 1)
         layout.first_l = l_first
@@ -10798,8 +10858,14 @@ fn lower_step_frames(d: Domain, source_state: State, store: CheckStore, flags: _
         layout.c_count = __s0_buffer_len(U64, layouts.c_values) - (c_first - 1)
         layout.first_s = s_first
         layout.s_count = __s0_buffer_len(U64, layouts.s_values) - (s_first - 1)
+        var d_pos = try __s0_buffer_new(U64, d)
+        var l_pos = try __s0_buffer_new(U64, d)
+        var v_pos = try __s0_buffer_new(U64, d)
+        var c_pos = try __s0_buffer_new(U64, d)
+        var s_pos = try __s0_buffer_new(U64, d)
         var di: U64 = 0
         while di < layout.d_count {
+            d_pos = try __s0_buffer_append(U64, d, d_pos, ordinal)
             state = try lower_step_add_field(d, state, layout.frame, ordinal, try lower_decimal_name(d, "d", di), domain.type_id)
             ordinal = ordinal + 1
             di = di + 1
@@ -10807,6 +10873,7 @@ fn lower_step_frames(d: Domain, source_state: State, store: CheckStore, flags: _
         var lj: U64 = 0
         while lj < layout.l_count {
             let local = lower_step_local_by_ordinal(state.mir, function, __s0_buffer_get(U64, layouts.l_locals, layout.first_l - 1 + lj) - 1)
+            l_pos = try __s0_buffer_append(U64, d, l_pos, ordinal)
             state = try lower_step_add_field(d, state, layout.frame, ordinal, try lower_decimal_name(d, "l", lj), local.local_type)
             ordinal = ordinal + 1
             lj = lj + 1
@@ -10814,21 +10881,61 @@ fn lower_step_frames(d: Domain, source_state: State, store: CheckStore, flags: _
         var vj: U64 = 0
         while vj < layout.v_count {
             let value = lower_step_value_by_ordinal(state.mir, function, __s0_buffer_get(U64, layouts.v_values, layout.first_v - 1 + vj) - 1)
+            v_pos = try __s0_buffer_append(U64, d, v_pos, ordinal)
             state = try lower_step_add_field(d, state, layout.frame, ordinal, try lower_decimal_name(d, "v", vj), value.value_type)
             ordinal = ordinal + 1
             vj = vj + 1
         }
         var cj: U64 = 0
         while cj < layout.c_count {
+            c_pos = try __s0_buffer_append(U64, d, c_pos, ordinal)
             state = try lower_step_add_field(d, state, layout.frame, ordinal, try lower_decimal_name(d, "c", cj), cleanup_id.type_id)
             ordinal = ordinal + 1
             cj = cj + 1
         }
         var sj: U64 = 0
         while sj < layout.s_count {
+            s_pos = try __s0_buffer_append(U64, d, s_pos, ordinal)
             state = try lower_step_add_field(d, state, layout.frame, ordinal, try lower_decimal_name(d, "s", sj), cleanup_scope.type_id)
             ordinal = ordinal + 1
             sj = sj + 1
+        }
+        var spi: U64 = 0
+        while spi < layout.point_count {
+            var save_first = __s0_buffer_len(LowerStepSaveRec, layouts.saves) + 1
+            var j: U64 = 0
+            while j < layout.d_count {
+                let old = __s0_buffer_get(U64, layouts.d_values, layout.first_d - 1 + j)
+                if old >= 1 && old <= vstride && __s0_buffer_get(U64, vflags, spi * vstride + old - 1) != 0 { layouts.saves = try __s0_buffer_append(LowerStepSaveRec, d, layouts.saves, LowerStepSaveRec(kind: 1, value: old, pos: __s0_buffer_get(U64, d_pos, j))) }
+                j = j + 1
+            }
+            j = 0
+            while j < layout.l_count {
+                let old = __s0_buffer_get(U64, layouts.l_locals, layout.first_l - 1 + j)
+                if old >= 1 && old <= lstride && __s0_buffer_get(U64, lflags, spi * lstride + old - 1) != 0 { layouts.saves = try __s0_buffer_append(LowerStepSaveRec, d, layouts.saves, LowerStepSaveRec(kind: 2, value: old, pos: __s0_buffer_get(U64, l_pos, j))) }
+                j = j + 1
+            }
+            j = 0
+            while j < layout.v_count {
+                let old = __s0_buffer_get(U64, layouts.v_values, layout.first_v - 1 + j)
+                if old >= 1 && old <= vstride && __s0_buffer_get(U64, vflags, spi * vstride + old - 1) != 0 { layouts.saves = try __s0_buffer_append(LowerStepSaveRec, d, layouts.saves, LowerStepSaveRec(kind: 3, value: old, pos: __s0_buffer_get(U64, v_pos, j))) }
+                j = j + 1
+            }
+            j = 0
+            while j < layout.c_count {
+                let old = __s0_buffer_get(U64, layouts.c_values, layout.first_c - 1 + j)
+                if old >= 1 && old <= vstride && __s0_buffer_get(U64, vflags, spi * vstride + old - 1) != 0 { layouts.saves = try __s0_buffer_append(LowerStepSaveRec, d, layouts.saves, LowerStepSaveRec(kind: 4, value: old, pos: __s0_buffer_get(U64, c_pos, j))) }
+                j = j + 1
+            }
+            j = 0
+            while j < layout.s_count {
+                let old = __s0_buffer_get(U64, layouts.s_values, layout.first_s - 1 + j)
+                if old >= 1 && old <= vstride && __s0_buffer_get(U64, vflags, spi * vstride + old - 1) != 0 { layouts.saves = try __s0_buffer_append(LowerStepSaveRec, d, layouts.saves, LowerStepSaveRec(kind: 5, value: old, pos: __s0_buffer_get(U64, s_pos, j))) }
+                j = j + 1
+            }
+            let rec = __s0_buffer_get(LowerStepPointSaveRec, layouts.point_saves, save_base - 1 + spi)
+            __s0_buffer_set(LowerStepPointSaveRec, layouts.point_saves, save_base - 1 + spi, LowerStepPointSaveRec(first: save_first, count: __s0_buffer_len(LowerStepSaveRec, layouts.saves) - (save_first - 1), x_pos: rec.x_pos, y_pos: rec.y_pos))
+            spi = spi + 1
         }
         let direct = __s0_buffer_get(MirFunctionRec, state.mir.functions, function - 1)
         state = try lower_step_add_field(d, state, layout.frame, ordinal, "out", direct.result_type)
@@ -10839,6 +10946,59 @@ fn lower_step_frames(d: Domain, source_state: State, store: CheckStore, flags: _
     }
     layouts.state = state
     return Ok(layouts)
+}
+
+type LowerStepPointInfoRec {
+    instruction: U64
+    block: U64
+    ordinal: U64
+    callee_frame: U64
+    callee_state: U64
+    callee_hidden: U64
+    suspend: U64
+    resume: U64
+    join: U64
+    after: U64
+    cancel_pre: U64
+    cancel_resume: U64
+    save_first: U64
+    save_count: U64
+    before_point: U64
+    next_point: U64
+}
+
+type LowerStepBodyNRec {
+    state: LowerState
+    old_function: U64
+    function: U64
+    frame: U64
+    state_type: U64
+    status: U64
+    old_blocks: U64
+    block_new: __s0_Buffer(U64)
+    value_map: __s0_Buffer(U64)
+    param_field: __s0_Buffer(U64)
+    hidden: U64
+    frame_param: U64
+    frame_owner: U64
+    frame_deref: U64
+    results_param: U64
+    points: __s0_Buffer(LowerStepPointInfoRec)
+    point_count: U64
+    first_point: U64
+    incoming: __s0_Buffer(U64)
+    overrides: __s0_Buffer(U64)
+    override_stride: U64
+    empty_override: __s0_Buffer(U64)
+    dispatch: U64
+    entry: U64
+    entry_go: U64
+    cancel_entry: U64
+    one_name: __s0_String
+    unit_name: __s0_String
+    cancelled_target: U64
+    param_values: __s0_Buffer(U64)
+    domain_sites: __s0_Buffer(U64)
 }
 
 type LowerStepBodyRec {
@@ -10888,6 +11048,7 @@ type LowerStepBodyRec {
     cancelled_target: U64
     param_values: __s0_Buffer(U64)
     results_param: U64
+    domain_sites: __s0_Buffer(U64)
 }
 
 fn lower_step_set_value_def(d: Domain, state: LowerState, function: U64, value_id: U64, block: U64, item: U64) -> Result(LowerState, __s0_Error) {
@@ -11088,6 +11249,17 @@ fn lower_step_add_instr_operands(d: Domain, body0: LowerStepBodyRec, old_instruc
     return Ok(body)
 }
 
+fn lower_step_target_is_block(op: U64) -> Bool {
+    if op == mir_op_alloc_checked() { return true }
+    if op >= mir_op_int_add_checked() && op <= mir_op_int_shr_checked() { return true }
+    if op >= mir_op_slice_index_checked() && op <= mir_op_enum_payload_checked() { return true }
+    if op == mir_op_array_index_checked() { return true }
+    if op == mir_op_vec_construct_checked() || op == mir_op_vec_grow_checked() { return true }
+    if op == mir_op_str_byte_checked() || op == mir_op_str_slice_checked() { return true }
+    if op == mir_op_int_convert_checked() { return true }
+    return false
+}
+
 fn lower_step_clone_instruction(d: Domain, body0: LowerStepBodyRec, old_instruction: U64, new_block: U64, override: __s0_Buffer(U64), use_override: Bool) -> Result(LowerStepBodyRec, __s0_Error) {
     var body = body0
     let item = lower_step_instr_by_id(body.state.mir, old_instruction)
@@ -11105,7 +11277,7 @@ fn lower_step_clone_instruction(d: Domain, body0: LowerStepBodyRec, old_instruct
     var named = MirNameStep(store: body.state.mir, start: 0, end: 0)
     if len(name) != 0 { named = try mir_append_name(d, body.state.mir, name) }
     var target = item.target
-    if target != 0 && target <= body.old_blocks { target = __s0_buffer_get(U64, body.block_new, target - 1) }
+    if lower_step_target_is_block(item.op) && target != 0 && target <= body.old_blocks { target = __s0_buffer_get(U64, body.block_new, target - 1) }
     let rec = MirInstrRec(function: body.function, block: active, ordinal: lower_instruction_ordinal(named.store, body.function, active), op: item.op, result: result, place: place.id, type_op: item.type_op, a: a, b: b, c: c, target: target, name_start: named.start, name_end: named.end)
     let made = try mir_add_instruction(d, named.store, rec)
     body.state = lower_with_mir(body.state, made.store)
@@ -11420,6 +11592,7 @@ fn lower_step_build_suspend(d: Domain, body0: LowerStepBodyRec, layout: LowerSte
     body.state = child_domain.state
     let created = try lower_add_instr(d, body.state, body.function, body.suspend, mir_op_domain_create(), child_domain.id, 0, 0, body.frame_owner, 0, 0, "")
     body.state = created.state
+    body.domain_sites = try __s0_buffer_append(U64, d, body.domain_sites, created.id)
     let empty = try __s0_buffer_new(U64, d)
     let callee_ref = try mir_intern_type(d, body.state.mir, mir_type_kind_safe_mut(), callee_frame, 0, 0, empty, 0)
     body.state = lower_with_mir(body.state, callee_ref.store)
@@ -11701,7 +11874,7 @@ fn lower_step_one_body(d: Domain, store: CheckStore, layouts: LowerStepLayoutsRe
         }
         block_id = block_id + 1
     }
-    var body = LowerStepBodyRec(state: state, old_function: old_function, function: step_function, frame: layout.frame, state_type: layout.state, status: layouts.status, old_blocks: old_blocks, block_new: block_new, value_map: value_map, param_field: params.direct_field, hidden: params.hidden, frame_param: frame_param.id, frame_owner: owner_param.id, frame_deref: deref_place.id, d_values: layouts.d_values, l_locals: layouts.l_locals, v_values: layouts.v_values, c_values: layouts.c_values, s_values: layouts.s_values, first_d: layout.first_d, d_count: layout.d_count, first_l: layout.first_l, l_count: layout.l_count, first_v: layout.first_v, v_count: layout.v_count, first_c: layout.first_c, c_count: layout.c_count, first_s: layout.first_s, s_count: layout.s_count, point_instruction: point_instruction, point_block: point_block, point_ordinal: point_ordinal, dispatch: dispatch_step.id, entry: entry_step.id, entry_go: entry_go_step.id, suspend: suspend, resume: resume, after: after, cancel_pre: cancel_pre, cancel_resume: cancel_resume, cancel_entry: cancel_entry_step.id, one_name: layouts.one_name, unit_name: layouts.unit_name, cancelled_target: layouts.cancelled_target, param_values: try __s0_buffer_new(U64, d), results_param: results_param.id)
+    var body = LowerStepBodyRec(state: state, old_function: old_function, function: step_function, frame: layout.frame, state_type: layout.state, status: layouts.status, old_blocks: old_blocks, block_new: block_new, value_map: value_map, param_field: params.direct_field, hidden: params.hidden, frame_param: frame_param.id, frame_owner: owner_param.id, frame_deref: deref_place.id, d_values: layouts.d_values, l_locals: layouts.l_locals, v_values: layouts.v_values, c_values: layouts.c_values, s_values: layouts.s_values, first_d: layout.first_d, d_count: layout.d_count, first_l: layout.first_l, l_count: layout.l_count, first_v: layout.first_v, v_count: layout.v_count, first_c: layout.first_c, c_count: layout.c_count, first_s: layout.first_s, s_count: layout.s_count, point_instruction: point_instruction, point_block: point_block, point_ordinal: point_ordinal, dispatch: dispatch_step.id, entry: entry_step.id, entry_go: entry_go_step.id, suspend: suspend, resume: resume, after: after, cancel_pre: cancel_pre, cancel_resume: cancel_resume, cancel_entry: cancel_entry_step.id, one_name: layouts.one_name, unit_name: layouts.unit_name, cancelled_target: layouts.cancelled_target, param_values: try __s0_buffer_new(U64, d), results_param: results_param.id, domain_sites: try __s0_buffer_new(U64, d))
     body = try lower_step_build_dispatch(d, body)
     if !body.state.valid { return Ok(body.state) }
     body = try lower_step_build_entry(d, body)
@@ -11745,7 +11918,599 @@ fn lower_step_one_body(d: Domain, store: CheckStore, layouts: LowerStepLayoutsRe
             ri = ri + 1
         }
     }
-    return Ok(body.state)
+    state = try lower_step_publish_metadata(d, body.state, layouts, layout, body.function, body.value_map, body.domain_sites)
+    return Ok(state)
+}
+
+
+fn lower_step_map_value_n(body: LowerStepBodyNRec, old: U64, override: __s0_Buffer(U64), use_override: Bool) -> U64 {
+    if old == 0 { return 0 }
+    if use_override && old - 1 < __s0_buffer_len(U64, override) {
+        let saved = __s0_buffer_get(U64, override, old - 1)
+        if saved != 0 { return saved }
+    }
+    if old - 1 < __s0_buffer_len(U64, body.param_values) {
+        let loaded = __s0_buffer_get(U64, body.param_values, old - 1)
+        if loaded != 0 { return loaded }
+    }
+    if old - 1 < __s0_buffer_len(U64, body.value_map) { return __s0_buffer_get(U64, body.value_map, old - 1) }
+    return 0
+}
+
+fn lower_step_param_value_for_n(body: LowerStepBodyNRec, old_instruction: U64, ordinal: U64) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirOperandRec, body.state.mir.operands) {
+        let operand = __s0_buffer_get(MirOperandRec, body.state.mir.operands, at)
+        if operand.owner == old_instruction && operand.kind == mir_operand_instruction() && operand.ordinal == ordinal { return operand.value }
+        at = at + 1
+    }
+    return 0
+}
+
+fn lower_step_override_window(d: Domain, flat: __s0_Buffer(U64), base: U64, count: U64) -> Result(__s0_Buffer(U64), __s0_Error) {
+    var out = try __s0_buffer_new(U64, d)
+    var at: U64 = 0
+    while at < count {
+        out = try __s0_buffer_append(U64, d, out, __s0_buffer_get(U64, flat, base + at))
+        at = at + 1
+    }
+    return Ok(out)
+}
+
+fn lower_step_build_dispatch_many(d: Domain, body0: LowerStepBodyNRec) -> Result(LowerStepBodyNRec, __s0_Error) {
+    var body = body0
+    let state_part = lower_step_field_part_named(body.state.mir, body.frame, "state")
+    let loaded = try lower_step_load_field(d, body.state, body.function, body.dispatch, body.frame_deref, state_part)
+    body.state = loaded.state
+    let term = try mir_add_terminator(d, body.state.mir, MirTermRec(function: body.function, block: body.dispatch, kind: mir_term_switch(), value: loaded.id, target: 0, then_block: 0, else_block: 0))
+    body.state = lower_with_mir(body.state, term.store)
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirTypePartRec, body.state.mir.type_parts) {
+        let part = __s0_buffer_get(MirTypePartRec, body.state.mir.type_parts, at)
+        if part.owner == body.state_type && part.kind == mir_type_part_variant() {
+            var target = body.entry
+            if part.ordinal != 0 {
+                let point = __s0_buffer_get(LowerStepPointInfoRec, body.points, part.ordinal - 1)
+                target = point.resume
+            }
+            let operand = try mir_add_operand(d, body.state.mir, MirOperandRec(kind: mir_operand_switch_case(), owner: term.id, ordinal: part.ordinal, edge: 0, value: 0, target: target, operand_type: 0, name_start: part.name_start, name_end: part.name_end))
+            body.state = lower_with_mir(body.state, operand.store)
+        }
+        at = at + 1
+    }
+    return Ok(body)
+}
+
+fn lower_step_build_entry_many(d: Domain, body0: LowerStepBodyNRec) -> Result(LowerStepBodyNRec, __s0_Error) {
+    var body = body0
+    let cancelled = try lower_step_cancelled_call(d, body.state, body.function, body.entry, body.cancelled_target)
+    body.state = cancelled.state
+    body.state = try lower_branch(d, body.state, body.function, body.entry, cancelled.id, body.cancel_entry, body.entry_go)
+    return Ok(body)
+}
+
+fn lower_step_build_resume_many(d: Domain, body0: LowerStepBodyNRec, layouts: LowerStepLayoutsRec) -> Result(LowerStepBodyNRec, __s0_Error) {
+    var body = body0
+    var pi: U64 = 0
+    while pi < body.point_count {
+        let point = __s0_buffer_get(LowerStepPointInfoRec, body.points, pi)
+        let cancelled = try lower_step_cancelled_call(d, body.state, body.function, point.resume, body.cancelled_target)
+        body.state = cancelled.state
+        body.state = try lower_branch(d, body.state, body.function, point.resume, cancelled.id, point.cancel_resume, point.join)
+        let x = try lower_step_load_indexed(d, body.state, body.function, point.join, body.frame_deref, body.state.mir, body.frame, "x", pi)
+        body.state = x.state
+        let y = try lower_step_load_indexed(d, body.state, body.function, point.join, body.frame_deref, body.state.mir, body.frame, "y", pi)
+        body.state = y.state
+        let child_place = try mir_add_place(d, body.state.mir, MirPlaceRec(function: body.function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: x.id))
+        body.state = lower_with_mir(body.state, child_place.store)
+        let out_part = lower_step_field_part_named(body.state.mir, point.callee_frame, "out")
+        if out_part.owner != point.callee_frame { return Ok(body) }
+        let out = try lower_step_load_field(d, body.state, body.function, point.join, child_place.id, out_part)
+        body.state = out.state
+        let call = lower_step_instr_by_id(body.state.mir, point.instruction)
+        var call_result_type = mir_type_unit()
+        if call.result != 0 { call_result_type = lower_step_value_by_ordinal(body.state.mir, body.old_function, call.result - 1).value_type }
+        var owned: U64 = 0
+        if call_result_type == mir_type_unit() {
+            let unit = try lower_step_const_get(d, body.state, body.function, point.join, body.unit_name, mir_type_unit())
+            body.state = unit.state
+            owned = unit.id
+        } else {
+            let copy = try lower_step_new_instr_value(d, body.state, body.function, point.join, call_result_type)
+            body.state = copy.state
+            let copied = try lower_add_instr(d, body.state, body.function, point.join, mir_op_copy_to_domain(), copy.id, 0, 0, body.results_param, out.id, 0, "")
+            body.state = copied.state
+            owned = copy.id
+        }
+        let destroyed = try lower_add_instr(d, body.state, body.function, point.join, mir_op_domain_destroy(), 0, 0, 0, y.id, 0, 0, "")
+        body.state = destroyed.state
+        let base = pi * body.override_stride
+        if call.result != 0 && call.result <= body.override_stride { __s0_buffer_set(U64, body.overrides, base + call.result - 1, owned) }
+        var si: U64 = 0
+        while si < point.save_count {
+            let rec = __s0_buffer_get(LowerStepSaveRec, layouts.saves, point.save_first - 1 + si)
+            let part = lower_step_frame_part_at(body.state.mir, body.frame, rec.pos)
+            if part.owner != body.frame { return Ok(body) }
+            let loaded = try lower_step_load_field(d, body.state, body.function, point.join, body.frame_deref, part)
+            body.state = loaded.state
+            if rec.kind == 2 {
+                let local = lower_step_local_by_ordinal(body.state.mir, body.old_function, rec.value - 1)
+                if local.function != body.old_function { return Ok(body) }
+                body.state = try lower_step_store_local(d, body.state, body.function, point.join, local.ordinal + 1, loaded.id)
+            } else { if rec.value >= 1 && rec.value <= body.override_stride { __s0_buffer_set(U64, body.overrides, base + rec.value - 1, loaded.id) } }
+            si = si + 1
+        }
+        let term = try mir_add_terminator(d, body.state.mir, MirTermRec(function: body.function, block: point.join, kind: mir_term_jump(), value: 0, target: point.after, then_block: 0, else_block: 0))
+        body.state = lower_with_mir(body.state, term.store)
+        pi = pi + 1
+    }
+    return Ok(body)
+}
+
+fn lower_step_build_suspend_many(d: Domain, body0: LowerStepBodyNRec, layouts: LowerStepLayoutsRec) -> Result(LowerStepBodyNRec, __s0_Error) {
+    var body = body0
+    var pi: U64 = 0
+    while pi < body.point_count {
+        let point = __s0_buffer_get(LowerStepPointInfoRec, body.points, pi)
+        body = try lower_step_body_with_param_loads(d, body, point.suspend)
+        if !body.state.valid { return Ok(body) }
+        let one = try lower_step_const_get(d, body.state, body.function, point.suspend, body.one_name, mir_type_u64())
+        body.state = one.state
+        let domain_type = try lower_step_intern_kind(d, body.state, mir_type_kind_domain_handle())
+        body.state = lower_with_mir(body.state, domain_type.store)
+        let child_domain = try lower_step_new_instr_value(d, body.state, body.function, point.suspend, domain_type.type_id)
+        body.state = child_domain.state
+        let created = try lower_add_instr(d, body.state, body.function, point.suspend, mir_op_domain_create(), child_domain.id, 0, 0, body.frame_owner, 0, 0, "")
+        body.state = created.state
+        body.domain_sites = try __s0_buffer_append(U64, d, body.domain_sites, created.id)
+        let empty = try __s0_buffer_new(U64, d)
+        let callee_ref = try mir_intern_type(d, body.state.mir, mir_type_kind_safe_mut(), point.callee_frame, 0, 0, empty, 0)
+        body.state = lower_with_mir(body.state, callee_ref.store)
+        let child = try lower_step_new_instr_value(d, body.state, body.function, point.suspend, callee_ref.type_id)
+        body.state = child.state
+        let allocated = try lower_add_instr(d, body.state, body.function, point.suspend, mir_op_alloc(), child.id, 0, point.callee_frame, child_domain.id, one.id, 0, "")
+        body.state = allocated.state
+        let child_place = try mir_add_place(d, body.state.mir, MirPlaceRec(function: body.function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: child.id))
+        body.state = lower_with_mir(body.state, child_place.store)
+        let entry = try lower_step_enum_construct(d, body.state, body.function, point.suspend, point.callee_state, "entry")
+        body.state = entry.state
+        let state_field = lower_step_field_part_named(body.state.mir, point.callee_frame, "state")
+        if state_field.owner != point.callee_frame { return Ok(body) }
+        body.state = try lower_step_store_field(d, body.state, body.function, point.suspend, child_place.id, state_field, entry.id)
+        let fields = try lower_step_callee_frame_fields(d, body.state.mir, point.callee_frame)
+        var arg_ordinal: U64 = 0
+        if point.callee_hidden == 1 { arg_ordinal = 1 }
+        var fi: U64 = 0
+        while fi < __s0_buffer_len(MirTypePartRec, fields) {
+            let field = __s0_buffer_get(MirTypePartRec, fields, fi)
+            let arg = lower_step_param_value_for_n(body, point.instruction, arg_ordinal)
+            let mapped = lower_step_map_value_n(body, arg, body.empty_override, false)
+            if mapped == 0 { return Ok(body) }
+            body.state = try lower_step_store_field(d, body.state, body.function, point.suspend, child_place.id, field, mapped)
+            arg_ordinal = arg_ordinal + 1
+            fi = fi + 1
+        }
+        let resume_name = try lower_decimal_name(d, "resume", pi)
+        let resume = try lower_step_enum_construct(d, body.state, body.function, point.suspend, body.state_type, resume_name)
+        body.state = resume.state
+        let parent_state = lower_step_field_part_named(body.state.mir, body.frame, "state")
+        if parent_state.owner != body.frame { return Ok(body) }
+        body.state = try lower_step_store_field(d, body.state, body.function, point.suspend, body.frame_deref, parent_state, resume.id)
+        body.state = try lower_step_store_indexed(d, body.state, body.function, point.suspend, body.frame_deref, body.state.mir, body.frame, "x", pi, child.id)
+        body.state = try lower_step_store_indexed(d, body.state, body.function, point.suspend, body.frame_deref, body.state.mir, body.frame, "y", pi, child_domain.id)
+        var ov = body.empty_override
+        if point.before_point != 0 { ov = try lower_step_override_window(d, body.overrides, (point.before_point - 1) * body.override_stride, body.override_stride) }
+        var si: U64 = 0
+        while si < point.save_count {
+            let rec = __s0_buffer_get(LowerStepSaveRec, layouts.saves, point.save_first - 1 + si)
+            var saved: U64 = 0
+            if rec.kind == 2 {
+                let local = lower_step_local_by_ordinal(body.state.mir, body.old_function, rec.value - 1)
+                if local.function != body.old_function { return Ok(body) }
+                let loaded = try lower_step_load_local(d, body.state, body.function, point.suspend, local.ordinal + 1, local.local_type)
+                body.state = loaded.state
+                saved = loaded.id
+            } else {
+                saved = lower_step_map_value_n(body, rec.value, ov, point.before_point != 0)
+                if saved == 0 { return Ok(body) }
+            }
+            let part = lower_step_frame_part_at(body.state.mir, body.frame, rec.pos)
+            if part.owner != body.frame { return Ok(body) }
+            body.state = try lower_step_store_field(d, body.state, body.function, point.suspend, body.frame_deref, part, saved)
+            si = si + 1
+        }
+        body.state = try lower_step_return_status(d, body.state, body.function, point.suspend, body.status, "call")
+        pi = pi + 1
+    }
+    return Ok(body)
+}
+
+fn lower_step_body_with_param_loads(d: Domain, body0: LowerStepBodyNRec, block: U64) -> Result(LowerStepBodyNRec, __s0_Error) {
+    var body = body0
+    var values = try lower_step_zero_map(d, body.override_stride)
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirParamRec, body.state.mir.params) {
+        let parameter = __s0_buffer_get(MirParamRec, body.state.mir.params, at)
+        if parameter.function == body.old_function && parameter.kind == mir_param_function() && parameter.value != 0 {
+            if body.hidden == 1 && parameter.ordinal == 0 {
+                if parameter.value - 1 < __s0_buffer_len(U64, values) { __s0_buffer_set(U64, values, parameter.value - 1, body.frame_owner) }
+            } else {
+                var slot: U64 = 0
+                if parameter.ordinal < __s0_buffer_len(U64, body.param_field) { slot = __s0_buffer_get(U64, body.param_field, parameter.ordinal) }
+                if slot == 0 { return Ok(lower_invalid_body_n(body)) }
+                let part = lower_step_frame_part_at(body.state.mir, body.frame, slot)
+                if part.owner != body.frame { return Ok(lower_invalid_body_n(body)) }
+                let loaded = try lower_step_load_field(d, body.state, body.function, block, body.frame_deref, part)
+                body.state = loaded.state
+                if parameter.value - 1 < __s0_buffer_len(U64, values) { __s0_buffer_set(U64, values, parameter.value - 1, loaded.id) }
+            }
+        }
+        at = at + 1
+    }
+    body.param_values = values
+    return Ok(body)
+}
+
+fn lower_invalid_body_n(body: LowerStepBodyNRec) -> LowerStepBodyNRec {
+    var out = body
+    out.state = lower_invalid(body.state)
+    return out
+}
+
+
+fn lower_step_u64_contains(items: __s0_Buffer(U64), value: U64) -> Bool {
+    var at: U64 = 0
+    while at < __s0_buffer_len(U64, items) {
+        if __s0_buffer_get(U64, items, at) == value { return true }
+        at = at + 1
+    }
+    return false
+}
+
+fn lower_step_published_for_direct(store: MirStore, direct: U64) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirStepRec, store.steps) {
+        let rec = __s0_buffer_get(MirStepRec, store.steps, at)
+        if rec.direct == direct { return rec.function }
+        at = at + 1
+    }
+    return 0
+}
+
+fn lower_step_publish_metadata(d: Domain, state: LowerState, layouts: LowerStepLayoutsRec, layout: LowerStepLayoutRec, step_function: U64, value_map: __s0_Buffer(U64), domain_sites: __s0_Buffer(U64)) -> Result(LowerState, __s0_Error) {
+    var current = state
+    let first_call = __s0_buffer_len(MirStepCallRec, current.mir.step_calls) + 1
+    var pi: U64 = 0
+    while pi < layout.point_count {
+        let point = __s0_buffer_get(LowerStepPointRec, layouts.points, layout.first_point - 1 + pi)
+        let saved = __s0_buffer_get(LowerStepPointSaveRec, layouts.point_saves, layout.first_point - 1 + pi)
+        let callee_index = lower_step_layout_for(layouts.layouts, point.callee)
+        if callee_index == 0 { return Ok(lower_invalid(current)) }
+        let callee = __s0_buffer_get(LowerStepLayoutRec, layouts.layouts, callee_index - 1)
+        var callee_function = lower_step_published_for_direct(current.mir, callee.function)
+        if callee_function == 0 { callee_function = step_function }
+        let calls = try __s0_buffer_append(MirStepCallRec, d, current.mir.step_calls, MirStepCallRec(resume: pi + 1, kind: 1, x_field: saved.x_pos, y_field: saved.y_pos, callee: callee_function))
+        current = lower_with_mir(current, mir_with_step_meta(current.mir, current.mir.steps, calls, current.mir.step_domains, current.mir.step_scopes))
+        pi = pi + 1
+    }
+    let first_domain = __s0_buffer_len(U64, current.mir.step_domains) + 1
+    var j: U64 = 0
+    while j < layout.d_count {
+        let old = __s0_buffer_get(U64, layouts.d_values, layout.first_d - 1 + j)
+        if old != 0 && old <= __s0_buffer_len(U64, value_map) {
+            let fresh = __s0_buffer_get(U64, value_map, old - 1)
+            if fresh != 0 {
+                let value = lower_step_value_by_ordinal(current.mir, step_function, fresh - 1)
+                let instruction = lower_step_def_instruction(current.mir, step_function, value)
+                if instruction != 0 {
+                    let domains = try __s0_buffer_append(U64, d, current.mir.step_domains, instruction)
+                    current = lower_with_mir(current, mir_with_step_meta(current.mir, current.mir.steps, current.mir.step_calls, domains, current.mir.step_scopes))
+                }
+            }
+        }
+        j = j + 1
+    }
+    j = 0
+    while j < __s0_buffer_len(U64, domain_sites) {
+        let site = __s0_buffer_get(U64, domain_sites, j)
+        if !lower_step_u64_contains(current.mir.step_domains, site) {
+            let domains = try __s0_buffer_append(U64, d, current.mir.step_domains, site)
+            current = lower_with_mir(current, mir_with_step_meta(current.mir, current.mir.steps, current.mir.step_calls, domains, current.mir.step_scopes))
+        }
+        j = j + 1
+    }
+    let first_scope = __s0_buffer_len(U64, current.mir.step_scopes) + 1
+    j = 0
+    while j < layout.s_count {
+        let old = __s0_buffer_get(U64, layouts.s_values, layout.first_s - 1 + j)
+        if old != 0 && old <= __s0_buffer_len(U64, value_map) {
+            let fresh = __s0_buffer_get(U64, value_map, old - 1)
+            if fresh != 0 {
+                let value = lower_step_value_by_ordinal(current.mir, step_function, fresh - 1)
+                let instruction = lower_step_def_instruction(current.mir, step_function, value)
+                if instruction != 0 {
+                    let scopes = try __s0_buffer_append(U64, d, current.mir.step_scopes, instruction)
+                    current = lower_with_mir(current, mir_with_step_meta(current.mir, current.mir.steps, current.mir.step_calls, current.mir.step_domains, scopes))
+                }
+            }
+        }
+        j = j + 1
+    }
+    let steps = try __s0_buffer_append(MirStepRec, d, current.mir.steps, MirStepRec(owner: layout.owner, direct: layout.function, function: step_function, frame: layout.frame, state: layout.state, p_count: layout.p_count, first_call: first_call, call_count: layout.point_count, first_domain: first_domain, domain_count: __s0_buffer_len(U64, current.mir.step_domains) - (first_domain - 1), first_scope: first_scope, scope_count: __s0_buffer_len(U64, current.mir.step_scopes) - (first_scope - 1)))
+    current = lower_with_mir(current, mir_with_step_meta(current.mir, steps, current.mir.step_calls, current.mir.step_domains, current.mir.step_scopes))
+    return Ok(current)
+}
+
+fn lower_step_body_rec_from_n(body: LowerStepBodyNRec) -> LowerStepBodyRec {
+    let empty = body.empty_override
+    return LowerStepBodyRec(state: body.state, old_function: body.old_function, function: body.function, frame: body.frame, state_type: body.state_type, status: body.status, old_blocks: body.old_blocks, block_new: body.block_new, value_map: body.value_map, param_field: body.param_field, hidden: body.hidden, frame_param: body.frame_param, frame_owner: body.frame_owner, frame_deref: body.frame_deref, d_values: empty, l_locals: empty, v_values: empty, c_values: empty, s_values: empty, first_d: 1, d_count: 0, first_l: 1, l_count: 0, first_v: 1, v_count: 0, first_c: 1, c_count: 0, first_s: 1, s_count: 0, point_instruction: 0, point_block: 0, point_ordinal: 0, dispatch: body.dispatch, entry: body.entry, entry_go: body.entry_go, suspend: 0, resume: 0, after: 0, cancel_pre: 0, cancel_resume: 0, cancel_entry: body.cancel_entry, one_name: body.one_name, unit_name: body.unit_name, cancelled_target: body.cancelled_target, param_values: body.param_values, results_param: body.results_param, domain_sites: body.domain_sites)
+}
+
+fn lower_step_body_n_with_state(body: LowerStepBodyNRec, state: LowerState) -> LowerStepBodyNRec {
+    var out = body
+    out.state = state
+    return out
+}
+
+fn lower_step_cancel_n(d: Domain, body0: LowerStepBodyNRec, block: U64, y_index: U64, destroy: Bool) -> Result(LowerStepBodyNRec, __s0_Error) {
+    var body = body0
+    if destroy {
+        let name = try lower_decimal_name(d, "y", y_index)
+        let part = lower_step_field_part_named(body.state.mir, body.frame, name)
+        if part.owner != body.frame { return Ok(body) }
+        let loaded = try lower_step_load_field(d, body.state, body.function, block, body.frame_deref, part)
+        body.state = loaded.state
+        let destroyed = try lower_add_instr(d, body.state, body.function, block, mir_op_domain_destroy(), 0, 0, 0, loaded.id, 0, 0, "")
+        body.state = destroyed.state
+    }
+    body.state = try lower_step_return_status(d, body.state, body.function, block, body.status, "cancelled")
+    return Ok(body)
+}
+
+fn lower_step_one_body_many(d: Domain, store: CheckStore, layouts: LowerStepLayoutsRec, layout: LowerStepLayoutRec, state0: LowerState) -> Result(LowerState, __s0_Error) {
+    var state = state0
+    let old_function = layout.function
+    let old_blocks = lower_step_direct_block_count(state.mir, old_function)
+    let old_values = lower_step_direct_value_count(state.mir, old_function)
+    if old_blocks == 0 || old_values == 0 { return Ok(lower_invalid(state)) }
+    let params = try lower_step_params(d, store, state.mir, layout.owner, old_function)
+    if !params.valid { return Ok(lower_invalid(state)) }
+    var points = try __s0_buffer_new(LowerStepPointInfoRec, d)
+    var pi: U64 = 0
+    while pi < layout.point_count {
+        let point = __s0_buffer_get(LowerStepPointRec, layouts.points, layout.first_point - 1 + pi)
+        let instruction = lower_step_point_instruction(state, layout.owner, point.expression)
+        if instruction == 0 { return Ok(lower_invalid(state)) }
+        let item = lower_step_instr_by_id(state.mir, instruction)
+        if item.function != old_function { return Ok(lower_invalid(state)) }
+        let callee_index = lower_step_layout_for(layouts.layouts, point.callee)
+        if callee_index == 0 { return Ok(lower_invalid(state)) }
+        let callee_layout = __s0_buffer_get(LowerStepLayoutRec, layouts.layouts, callee_index - 1)
+        let callee_params = try lower_step_params(d, store, state.mir, point.callee, callee_layout.function)
+        if !callee_params.valid { return Ok(lower_invalid(state)) }
+        let saved = __s0_buffer_get(LowerStepPointSaveRec, layouts.point_saves, layout.first_point - 1 + pi)
+        points = try __s0_buffer_append(LowerStepPointInfoRec, d, points, LowerStepPointInfoRec(instruction: instruction, block: item.block, ordinal: item.ordinal, callee_frame: callee_layout.frame, callee_state: callee_layout.state, callee_hidden: callee_params.hidden, suspend: 0, resume: 0, join: 0, after: 0, cancel_pre: 0, cancel_resume: 0, save_first: saved.first, save_count: saved.count, before_point: 0, next_point: 0))
+        pi = pi + 1
+    }
+    let step_name = try lower_step_instance_name(d, state.mir, old_function, "__alder_step.run.")
+    let made_fn = try mir_add_function(d, state.mir, step_name, layouts.status)
+    state = lower_with_mir(state, made_fn.store)
+    let step_function = made_fn.id
+    var local_count: U64 = 0
+    var local_at: U64 = 0
+    while local_at < __s0_buffer_len(MirLocalRec, state.mir.locals) {
+        let local = __s0_buffer_get(MirLocalRec, state.mir.locals, local_at)
+        if local.function == old_function && local.ordinal + 1 > local_count { local_count = local.ordinal + 1 }
+        local_at = local_at + 1
+    }
+    var local_ordinal: U64 = 0
+    while local_ordinal < local_count {
+        let local = lower_step_local_by_ordinal(state.mir, old_function, local_ordinal)
+        if local.function != old_function { return Ok(lower_invalid(state)) }
+        let local_name = try lower_word(d, state.mir.names, local.name_start, local.name_end)
+        let copied = try mir_add_local(d, state.mir, step_function, local_ordinal, local_name, local.local_type)
+        state = lower_with_mir(state, copied.store)
+        local_ordinal = local_ordinal + 1
+    }
+    let empty = try __s0_buffer_new(U64, d)
+    let frame_ref = try mir_intern_type(d, state.mir, mir_type_kind_safe_mut(), layout.frame, 0, 0, empty, 0)
+    state = lower_with_mir(state, frame_ref.store)
+    let domain_type = try lower_step_intern_kind(d, state, mir_type_kind_domain_handle())
+    state = lower_with_mir(state, domain_type.store)
+    let results_param = try mir_add_function_param(d, state.mir, step_function, 0, "d", domain_type.type_id)
+    state = lower_with_mir(state, results_param.store)
+    let frame_param = try mir_add_function_param(d, state.mir, step_function, 1, "frame", frame_ref.type_id)
+    state = lower_with_mir(state, frame_param.store)
+    let owner_param = try mir_add_function_param(d, state.mir, step_function, 2, "frame_owner", domain_type.type_id)
+    state = lower_with_mir(state, owner_param.store)
+    let deref_place = try mir_add_place(d, state.mir, MirPlaceRec(function: step_function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: frame_param.id))
+    state = lower_with_mir(state, deref_place.store)
+    let dispatch_step = try lower_step_add_block(d, state, step_function, 0, "bb0")
+    state = dispatch_step.state
+    let entry_step = try lower_step_add_block(d, state, step_function, 1, "bb_entry")
+    state = entry_step.state
+    let entry_go_step = try lower_step_add_block(d, state, step_function, 2, "bb_entry_go")
+    state = entry_go_step.state
+    var block_new = try __s0_buffer_new(U64, d)
+    block_new = try __s0_buffer_append(U64, d, block_new, entry_go_step.id)
+    var block_ordinal: U64 = 3
+    var old_id: U64 = 2
+    while old_id <= old_blocks {
+        let added = try lower_step_add_block(d, state, step_function, block_ordinal, try lower_decimal_name(d, "bb_old_", old_id))
+        state = added.state
+        block_new = try __s0_buffer_append(U64, d, block_new, added.id)
+        block_ordinal = block_ordinal + 1
+        old_id = old_id + 1
+    }
+    pi = 0
+    while pi < layout.point_count {
+        var info = __s0_buffer_get(LowerStepPointInfoRec, points, pi)
+        let s = try lower_step_add_block(d, state, step_function, block_ordinal, try lower_decimal_name(d, "bb_suspend_", pi))
+        state = s.state
+        block_ordinal = block_ordinal + 1
+        let r = try lower_step_add_block(d, state, step_function, block_ordinal, try lower_decimal_name(d, "bb_resume_", pi))
+        state = r.state
+        block_ordinal = block_ordinal + 1
+        let j = try lower_step_add_block(d, state, step_function, block_ordinal, try lower_decimal_name(d, "bb_join_", pi))
+        state = j.state
+        block_ordinal = block_ordinal + 1
+        let a = try lower_step_add_block(d, state, step_function, block_ordinal, try lower_decimal_name(d, "bb_after_", pi))
+        state = a.state
+        block_ordinal = block_ordinal + 1
+        let cp = try lower_step_add_block(d, state, step_function, block_ordinal, try lower_decimal_name(d, "bb_cancel_pre_", pi))
+        state = cp.state
+        block_ordinal = block_ordinal + 1
+        let cr = try lower_step_add_block(d, state, step_function, block_ordinal, try lower_decimal_name(d, "bb_cancel_resume_", pi))
+        state = cr.state
+        block_ordinal = block_ordinal + 1
+        info = LowerStepPointInfoRec(instruction: info.instruction, block: info.block, ordinal: info.ordinal, callee_frame: info.callee_frame, callee_state: info.callee_state, callee_hidden: info.callee_hidden, suspend: s.id, resume: r.id, join: j.id, after: a.id, cancel_pre: cp.id, cancel_resume: cr.id, save_first: info.save_first, save_count: info.save_count, before_point: 0, next_point: 0)
+        __s0_buffer_set(LowerStepPointInfoRec, points, pi, info)
+        pi = pi + 1
+    }
+    let cancel_entry_step = try lower_step_add_block(d, state, step_function, block_ordinal, "bb_cancel_entry")
+    state = cancel_entry_step.state
+    var result_flags = try lower_step_zero_map(d, old_values)
+    pi = 0
+    while pi < layout.point_count {
+        let info = __s0_buffer_get(LowerStepPointInfoRec, points, pi)
+        let call = lower_step_instr_by_id(state.mir, info.instruction)
+        if call.result != 0 && call.result <= old_values { __s0_buffer_set(U64, result_flags, call.result - 1, 1) }
+        pi = pi + 1
+    }
+    let value_map = try lower_step_zero_map(d, old_values)
+    var ordinal: U64 = 0
+    while ordinal < old_values {
+        let value = lower_step_value_by_ordinal(state.mir, old_function, ordinal)
+        if value.function != old_function { return Ok(lower_invalid(state)) }
+        if value.def_kind == mir_value_def_function_param() || value.def_kind == mir_value_def_block_param() { } else {
+            if __s0_buffer_get(U64, result_flags, ordinal) != 0 { } else {
+                let made = try lower_step_new_value(d, state, step_function, value.value_type, value.def_kind, 0, 0)
+                state = made.state
+                __s0_buffer_set(U64, value_map, ordinal, made.id)
+            }
+        }
+        ordinal = ordinal + 1
+    }
+    var block_id: U64 = 1
+    while block_id <= old_blocks {
+        var at: U64 = 0
+        while at < __s0_buffer_len(MirParamRec, state.mir.params) {
+            let parameter = __s0_buffer_get(MirParamRec, state.mir.params, at)
+            if parameter.function == old_function && parameter.kind == mir_param_block() && parameter.block == block_id && parameter.value != 0 {
+                let name = try lower_word(d, state.mir.names, parameter.name_start, parameter.name_end)
+                let made = try mir_add_block_param(d, state.mir, step_function, __s0_buffer_get(U64, block_new, block_id - 1), parameter.ordinal, name, parameter.param_type)
+                state = lower_with_mir(state, made.store)
+                if parameter.value - 1 < __s0_buffer_len(U64, value_map) { __s0_buffer_set(U64, value_map, parameter.value - 1, made.id) }
+            }
+            at = at + 1
+        }
+        block_id = block_id + 1
+    }
+    let override_stride = old_values + 1
+    var overrides = try lower_step_zero_map(d, layout.point_count * override_stride)
+    let empty_override = try lower_step_zero_map(d, override_stride)
+    let indexes = try mir_vindex_build(d, state.mir)
+    let cfg = try lower_step_cfg_build(d, state.mir, indexes, old_function)
+    var incoming = try lower_step_zero_map(d, old_blocks + 1)
+    var b: U64 = 1
+    while b <= old_blocks {
+        var best: U64 = 0
+        var qi: U64 = 1
+        while qi <= layout.point_count {
+            let info = __s0_buffer_get(LowerStepPointInfoRec, points, qi - 1)
+            if info.block != b && lower_step_dominates(cfg, info.block, b) { if best == 0 || qi > best { best = qi } }
+            qi = qi + 1
+        }
+        __s0_buffer_set(U64, incoming, b - 1, best)
+        b = b + 1
+    }
+    pi = 0
+    while pi < layout.point_count {
+        var info = __s0_buffer_get(LowerStepPointInfoRec, points, pi)
+        var before = __s0_buffer_get(U64, incoming, info.block - 1)
+        if pi > 0 && __s0_buffer_get(LowerStepPointInfoRec, points, pi - 1).block == info.block { before = pi }
+        var next: U64 = 0
+        var qi: U64 = pi + 1
+        while qi < layout.point_count {
+            if __s0_buffer_get(LowerStepPointInfoRec, points, qi).block == info.block { next = qi + 1
+                qi = layout.point_count } else { qi = qi + 1 }
+        }
+        info = LowerStepPointInfoRec(instruction: info.instruction, block: info.block, ordinal: info.ordinal, callee_frame: info.callee_frame, callee_state: info.callee_state, callee_hidden: info.callee_hidden, suspend: info.suspend, resume: info.resume, join: info.join, after: info.after, cancel_pre: info.cancel_pre, cancel_resume: info.cancel_resume, save_first: info.save_first, save_count: info.save_count, before_point: before, next_point: next)
+        __s0_buffer_set(LowerStepPointInfoRec, points, pi, info)
+        pi = pi + 1
+    }
+    var body = LowerStepBodyNRec(state: state, old_function: old_function, function: step_function, frame: layout.frame, state_type: layout.state, status: layouts.status, old_blocks: old_blocks, block_new: block_new, value_map: value_map, param_field: params.direct_field, hidden: params.hidden, frame_param: frame_param.id, frame_owner: owner_param.id, frame_deref: deref_place.id, results_param: results_param.id, points: points, point_count: layout.point_count, first_point: layout.first_point, incoming: incoming, overrides: overrides, override_stride: override_stride, empty_override: empty_override, dispatch: dispatch_step.id, entry: entry_step.id, entry_go: entry_go_step.id, cancel_entry: cancel_entry_step.id, one_name: layouts.one_name, unit_name: layouts.unit_name, cancelled_target: layouts.cancelled_target, param_values: try __s0_buffer_new(U64, d), domain_sites: try __s0_buffer_new(U64, d))
+    body = try lower_step_build_dispatch_many(d, body)
+    body = try lower_step_build_entry_many(d, body)
+    body = try lower_step_cancel_n(d, body, body.cancel_entry, 0, false)
+    body = try lower_step_build_resume_many(d, body, layouts)
+    body = try lower_step_build_suspend_many(d, body, layouts)
+    pi = 0
+    while pi < layout.point_count {
+        let info = __s0_buffer_get(LowerStepPointInfoRec, body.points, pi)
+        body = try lower_step_cancel_n(d, body, info.cancel_pre, pi, false)
+        body = try lower_step_cancel_n(d, body, info.cancel_resume, pi, true)
+        pi = pi + 1
+    }
+    b = 1
+    while b <= old_blocks {
+
+        var first: U64 = 0
+        pi = 0
+        while pi < layout.point_count {
+            if __s0_buffer_get(LowerStepPointInfoRec, body.points, pi).block == b && first == 0 { first = pi + 1 }
+            pi = pi + 1
+        }
+        var ov = empty_override
+        var use = false
+        let inc = __s0_buffer_get(U64, body.incoming, b - 1)
+        if inc != 0 { ov = try lower_step_override_window(d, body.overrides, (inc - 1) * body.override_stride, body.override_stride)
+            use = true }
+        if first == 0 {
+            let rec = lower_step_body_rec_from_n(body)
+            let cloned = try lower_step_clone_block(d, rec, b, __s0_buffer_get(U64, body.block_new, b - 1), ov, use)
+            if !cloned.state.valid { return Ok(cloned.state) }
+            body = lower_step_body_n_with_state(body, cloned.state)
+        } else {
+            let info = __s0_buffer_get(LowerStepPointInfoRec, body.points, first - 1)
+            let rec = lower_step_body_rec_from_n(body)
+            let cloned = try lower_step_clone_prefix(d, rec, b, __s0_buffer_get(U64, body.block_new, b - 1), 0, info.ordinal, ov, use)
+            if !cloned.state.valid { return Ok(cloned.state) }
+            body = lower_step_body_n_with_state(body, cloned.state)
+            let cancelled = try lower_step_cancelled_call(d, body.state, body.function, __s0_buffer_get(U64, body.block_new, b - 1), body.cancelled_target)
+            body.state = cancelled.state
+            body.state = try lower_branch(d, body.state, body.function, __s0_buffer_get(U64, body.block_new, b - 1), cancelled.id, info.cancel_pre, info.suspend)
+        }
+        b = b + 1
+    }
+    pi = 0
+    while pi < layout.point_count {
+        let info = __s0_buffer_get(LowerStepPointInfoRec, body.points, pi)
+        let ov = try lower_step_override_window(d, body.overrides, pi * body.override_stride, body.override_stride)
+        let count = lower_step_block_instr_count(body.state.mir, body.old_function, info.block)
+        var end = count
+        if info.next_point != 0 { end = __s0_buffer_get(LowerStepPointInfoRec, body.points, info.next_point - 1).ordinal }
+        let rec = lower_step_body_rec_from_n(body)
+        let cloned = try lower_step_clone_prefix(d, rec, info.block, info.after, info.ordinal + 1, end, ov, true)
+        if !cloned.state.valid { return Ok(cloned.state) }
+        body = lower_step_body_n_with_state(body, cloned.state)
+        if info.next_point != 0 {
+            let next = __s0_buffer_get(LowerStepPointInfoRec, body.points, info.next_point - 1)
+            let cancelled = try lower_step_cancelled_call(d, body.state, body.function, info.after, body.cancelled_target)
+            body.state = cancelled.state
+            body.state = try lower_branch(d, body.state, body.function, info.after, cancelled.id, next.cancel_pre, next.suspend)
+        } else {
+            let term = lower_step_term_for(body.state.mir, body.old_function, info.block)
+            if term == 0 { return Ok(lower_invalid(body.state)) }
+            let rec2 = lower_step_body_rec_from_n(body)
+            let cloned2 = try lower_step_clone_terminator(d, rec2, term, info.after, ov, true)
+            if !cloned2.state.valid { return Ok(cloned2.state) }
+            body = lower_step_body_n_with_state(body, cloned2.state)
+        }
+        pi = pi + 1
+    }
+    state = try lower_step_publish_metadata(d, body.state, layouts, layout, body.function, body.value_map, body.domain_sites)
+    return Ok(state)
 }
 
 fn lower_step_bodies(d: Domain, store: CheckStore, layouts: LowerStepLayoutsRec) -> Result(LowerState, __s0_Error) {
@@ -11753,7 +12518,11 @@ fn lower_step_bodies(d: Domain, store: CheckStore, layouts: LowerStepLayoutsRec)
     var at: U64 = 0
     while at < __s0_buffer_len(LowerStepLayoutRec, layouts.layouts) {
         let layout = __s0_buffer_get(LowerStepLayoutRec, layouts.layouts, at)
-        state = try lower_step_one_body(d, store, layouts, layout, state)
+        if layout.point_count <= 1 {
+            state = try lower_step_one_body(d, store, layouts, layout, state)
+        } else {
+            state = try lower_step_one_body_many(d, store, layouts, layout, state)
+        }
         if !state.valid { return Ok(state) }
         at = at + 1
     }
@@ -11791,9 +12560,9 @@ fn lower_step_functions(d: Domain, source_state: State, spans: __s0_Buffer(Check
         }
         at = at + 1
     }
-    // Keep only instances whose one-point (or no-point) shape the splitter can
-    // build. A cleared instance falls back to its direct body, and its callers
-    // are recomputed until the step set is a fixed point.
+    // Keep only instances the splitter can build. A cleared instance falls
+    // back to its direct body, and its callers are recomputed until the step
+    // set is a fixed point.
     var flags = base.flags
     var round: U64 = 0
     var stable = false
@@ -11823,14 +12592,14 @@ fn lower_step_functions(d: Domain, source_state: State, spans: __s0_Buffer(Check
         flag_at = flag_at + 1
     }
     if !any { return Ok(state) }
-    var layouts = LowerStepLayoutsRec(state: state, layouts: try __s0_buffer_new(LowerStepLayoutRec, d), points: try __s0_buffer_new(LowerStepPointRec, d), d_values: try __s0_buffer_new(U64, d), l_locals: try __s0_buffer_new(U64, d), v_values: try __s0_buffer_new(U64, d), c_values: try __s0_buffer_new(U64, d), s_values: try __s0_buffer_new(U64, d), status: 0, one_name: "", unit_name: "", cancelled_target: 0)
+    var layouts = LowerStepLayoutsRec(state: state, layouts: try __s0_buffer_new(LowerStepLayoutRec, d), points: try __s0_buffer_new(LowerStepPointRec, d), d_values: try __s0_buffer_new(U64, d), l_locals: try __s0_buffer_new(U64, d), v_values: try __s0_buffer_new(U64, d), c_values: try __s0_buffer_new(U64, d), s_values: try __s0_buffer_new(U64, d), saves: try __s0_buffer_new(LowerStepSaveRec, d), point_saves: try __s0_buffer_new(LowerStepPointSaveRec, d), status: 0, one_name: "", unit_name: "", cancelled_target: 0)
     let status = try lower_step_status_type(d, layouts.state)
-    layouts = LowerStepLayoutsRec(state: lower_with_mir(layouts.state, status.store), layouts: layouts.layouts, points: layouts.points, d_values: layouts.d_values, l_locals: layouts.l_locals, v_values: layouts.v_values, c_values: layouts.c_values, s_values: layouts.s_values, status: status.id, one_name: layouts.one_name, unit_name: layouts.unit_name, cancelled_target: layouts.cancelled_target)
+    layouts = LowerStepLayoutsRec(state: lower_with_mir(layouts.state, status.store), layouts: layouts.layouts, points: layouts.points, d_values: layouts.d_values, l_locals: layouts.l_locals, v_values: layouts.v_values, c_values: layouts.c_values, s_values: layouts.s_values, saves: layouts.saves, point_saves: layouts.point_saves, status: status.id, one_name: layouts.one_name, unit_name: layouts.unit_name, cancelled_target: layouts.cancelled_target)
     let one = try lower_step_named_const(d, layouts.state.mir, "__alder_step_one", mir_type_u64(), mir_const_int(), 1)
     let unit = try lower_step_named_const(d, one.store, "__alder_step_unit", mir_type_unit(), mir_const_unit(), 0)
-    layouts = LowerStepLayoutsRec(state: lower_with_mir(layouts.state, unit.store), layouts: layouts.layouts, points: layouts.points, d_values: layouts.d_values, l_locals: layouts.l_locals, v_values: layouts.v_values, c_values: layouts.c_values, s_values: layouts.s_values, status: layouts.status, one_name: try lower_step_const_name(d, unit.store, one.id), unit_name: try lower_step_const_name(d, unit.store, unit.id), cancelled_target: layouts.cancelled_target)
+    layouts = LowerStepLayoutsRec(state: lower_with_mir(layouts.state, unit.store), layouts: layouts.layouts, points: layouts.points, d_values: layouts.d_values, l_locals: layouts.l_locals, v_values: layouts.v_values, c_values: layouts.c_values, s_values: layouts.s_values, saves: layouts.saves, point_saves: layouts.point_saves, status: layouts.status, one_name: try lower_step_const_name(d, unit.store, one.id), unit_name: try lower_step_const_name(d, unit.store, unit.id), cancelled_target: layouts.cancelled_target)
     let binding = try lower_step_binding_target(d, layouts.state)
-    layouts = LowerStepLayoutsRec(state: binding.state, layouts: layouts.layouts, points: layouts.points, d_values: layouts.d_values, l_locals: layouts.l_locals, v_values: layouts.v_values, c_values: layouts.c_values, s_values: layouts.s_values, status: layouts.status, one_name: layouts.one_name, unit_name: layouts.unit_name, cancelled_target: binding.id)
+    layouts = LowerStepLayoutsRec(state: binding.state, layouts: layouts.layouts, points: layouts.points, d_values: layouts.d_values, l_locals: layouts.l_locals, v_values: layouts.v_values, c_values: layouts.c_values, s_values: layouts.s_values, saves: layouts.saves, point_saves: layouts.point_saves, status: layouts.status, one_name: layouts.one_name, unit_name: layouts.unit_name, cancelled_target: binding.id)
     return lower_step_build_all(d, source_state, spans, store, flags, layouts)
 }
 
