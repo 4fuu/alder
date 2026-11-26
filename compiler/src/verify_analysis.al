@@ -3263,15 +3263,21 @@ fn mir_vframe_phase6(d: Domain, store: MirStore, indexes: MirVIndexes, out0: __s
             slot = slot + 1 }
         var queue = try __s0_buffer_new(U64, d)
         // Seed the dispatch block with the caller-initialized p/o/state fields.
-        let p_pos = mir_vframe_field_pos(scan, frame_index, mir_vframe_field_param(), 0)
-        let o_pos = mir_vframe_field_pos(scan, frame_index, mir_vframe_field_owner(), 0)
-        let s_pos = mir_vframe_field_pos(scan, frame_index, mir_vframe_field_state(), 0)
         let out_pos = mir_vframe_field_pos(scan, frame_index, mir_vframe_field_out(), 0)
-        var base_word: U64 = 0
-        if p_pos != 0 { base_word = mir_vframe_set_bit(base_word, (p_pos - 1) % 64) }
-        if o_pos != 0 { base_word = mir_vframe_set_bit(base_word, (o_pos - 1) % 64) }
-        if s_pos != 0 { base_word = mir_vframe_set_bit(base_word, (s_pos - 1) % 64) }
-        __s0_buffer_set(U64, must, words, base_word)
+        // Every caller-initialized p/o/state field seeds the dispatch block,
+        // not just the first field of each group.
+        let frame_rec = __s0_buffer_get(MirVFrameRec, scan.frames, frame_index - 1)
+        var seed_field: U64 = 0
+        while seed_field < frame_rec.field_count {
+            let field = __s0_buffer_get(MirVFrameField, scan.fields, frame_rec.field_start + seed_field)
+            if field.kind == mir_vframe_field_param() || field.kind == mir_vframe_field_owner() || field.kind == mir_vframe_field_state() {
+                let pos = seed_field + 1
+                let word = (pos - 1) / 64
+                if word < words { __s0_buffer_set(U64, must, words + word, mir_vframe_set_bit(__s0_buffer_get(U64, must, words + word), (pos - 1) % 64)) }
+            }
+            seed_field = seed_field + 1
+        }
+        let base_word = __s0_buffer_get(U64, must, words)
         __s0_buffer_set(U64, seeded, 0, 1)
         __s0_buffer_set(U64, queued, 0, 1)
         queue = try __s0_buffer_append(U64, d, queue, 1)
@@ -3475,8 +3481,9 @@ fn mir_vframe_phase6(d: Domain, store: MirStore, indexes: MirVIndexes, out0: __s
                     let x = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
                     if x.op == mir_op_load() { let part = mir_vframe_field_part_of(store, indexes, function, x.place, step.frame_param)
                         if part != 0 { let pos = mir_vframe_field_pos_part(scan, store, frame_index, part)
-                            var initialized = pos == p_pos || pos == o_pos || pos == s_pos
-                            if !initialized && (pos - 1) / 64 < words { if mir_vframe_bit(__s0_buffer_get(U64, must, bi * words + (pos - 1) / 64), (pos - 1) % 64) { initialized = true } }
+                            let field_kind = mir_vframe_field_kind_pos(scan, frame_index, pos)
+                            var initialized = field_kind == mir_vframe_field_param() || field_kind == mir_vframe_field_owner() || field_kind == mir_vframe_field_state()
+                            if !initialized && pos >= 1 && (pos - 1) / 64 < words { if mir_vframe_bit(__s0_buffer_get(U64, must, bi * words + (pos - 1) / 64), (pos - 1) % 64) { initialized = true } }
                             if !initialized { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), mir_vdiag_frame_uninit_load(), function, bi, iid, 0, x.place, 0, function, 0, 0, pos)) } } }
                     if x.op == mir_op_store() { let part = mir_vframe_field_part_of(store, indexes, function, x.place, step.frame_param)
                         if part != 0 { let pos = mir_vframe_field_pos_part(scan, store, frame_index, part)

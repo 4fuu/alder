@@ -955,6 +955,41 @@ if x.op == mir_op_load() {
 // destroy of that domain cannot dangle it and the merges below are skipped.
 if value.value_type != 0 && value.value_type <= __s0_buffer_len(U64, transfer.type_free) && __s0_buffer_get(U64, transfer.type_free, value.value_type - 1) != 0 { return Ok(durable) }
 let p = __s0_buffer_get(MirPlaceRec, store.places, x.place - 1)
+// A frame field load keeps the direct identity anchored to the
+// (activation, field) pair. Only stores through that same frame field feed
+// it; a field with no local store inherits the frame view's provenance.
+if p.kind == mir_place_field() {
+    let base = __s0_buffer_get(MirPlaceRec, store.places, p.base - 1)
+    if base.kind == mir_place_deref() {
+        let view_type = mir_v5_value_type(store, indexes, function, base.deref_value)
+        if mir_vframe_type_kind_is(store, view_type, mir_type_kind_safe_mut()) {
+            let elem = __s0_buffer_get(MirTypeRec, store.types, view_type - 1).elem
+            if mir_vframe_type_kind_is(store, elem, mir_type_kind_aggregate()) {
+                let frame_type = __s0_buffer_get(MirTypeRec, store.types, elem - 1)
+                if mir_vframe_prefix(store, frame_type.name_start, frame_type.name_end, mir_vframe_type_prefix()) {
+                    var found = false
+                    var si: U64 = 0
+                    while si < __s0_buffer_len(MirInstrRec, store.instructions) {
+                        let stored = __s0_buffer_get(MirInstrRec, store.instructions, si)
+                        if stored.function == function && stored.op == mir_op_store() && stored.place != 0 {
+                            let sp = __s0_buffer_get(MirPlaceRec, store.places, stored.place - 1)
+                            if sp.kind == mir_place_field() {
+                                let sb = __s0_buffer_get(MirPlaceRec, store.places, sp.base - 1)
+                                if sb.kind == mir_place_deref() && sb.deref_value == base.deref_value && mir_vname_equal(store, sp.field_start, sp.field_end, p.field_start, p.field_end) {
+                                    durable = try mir_v6_merge_edge(d, durable, index, consumers, function, value_id, stored.a)
+                                    found = true
+                                }
+                            }
+                        }
+                        si = si + 1
+                    }
+                    if !found { durable = try mir_v6_merge_edge(d, durable, index, consumers, function, value_id, base.deref_value) }
+                    return Ok(durable)
+                }
+            }
+        }
+    }
+}
 if p.kind == mir_place_deref() { durable = try mir_v6_merge_edge(d, durable, index, consumers, function, value_id, p.deref_value) }
 // Stores retain their original block/ordinal order without materializing the
 // potentially quadratic load-by-aliasing-store cross product.

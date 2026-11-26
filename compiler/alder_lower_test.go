@@ -26,6 +26,7 @@ func runLowerConformance(t *testing.T, exe string) {
 	t.Run("m75-ordered-collections", func(t *testing.T) { runAlderM75OrderedLowerBehavior(t, exe) })
 	t.Run("m75-fn-values", func(t *testing.T) { runAlderFnValueLowerBehavior(t, exe) })
 	t.Run("m75-closures", func(t *testing.T) { runAlderClosureLowerBehavior(t, exe) })
+	t.Run("m9-step-split", func(t *testing.T) { runAlderStepSplitLowerConformance(t, exe) })
 	t.Run("m75-default-methods", func(t *testing.T) { runAlderDefaultMethodLowerBehavior(t, exe) })
 	t.Run("m75-mut-cursors", func(t *testing.T) { runAlderM75MutCursorLowerBehavior(t, exe) })
 	t.Run("m75-constrained-shapes", func(t *testing.T) { runAlderConstrainedShapesLowerBehavior(t, exe) })
@@ -1477,7 +1478,11 @@ func runLowerCompiler(t *testing.T, exe string, files map[string]string, order [
 		t.Fatal(err)
 	}
 	for name, text := range files {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o644); err != nil {
+		target := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(target, []byte(text), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}

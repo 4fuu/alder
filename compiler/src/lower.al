@@ -11076,7 +11076,7 @@ fn lower_step_add_instr_operands(d: Domain, body0: LowerStepBodyRec, old_instruc
     var at: U64 = 0
     while at < __s0_buffer_len(MirOperandRec, body.state.mir.operands) {
         let operand = __s0_buffer_get(MirOperandRec, body.state.mir.operands, at)
-        if operand.owner == old_instruction {
+        if operand.owner == old_instruction && (operand.kind == mir_operand_instruction() || operand.kind == mir_operand_checked_edge_arg() || operand.kind == mir_operand_aggregate_field()) {
             let mapped = lower_step_map_value(body, operand.value, override, use_override)
             var target = operand.target
             if target != 0 && target <= body.old_blocks { target = __s0_buffer_get(U64, body.block_new, target - 1) }
@@ -11152,7 +11152,7 @@ fn lower_step_clone_terminator(d: Domain, body0: LowerStepBodyRec, old_term: U64
     var at: U64 = 0
     while at < __s0_buffer_len(MirOperandRec, body.state.mir.operands) {
         let operand = __s0_buffer_get(MirOperandRec, body.state.mir.operands, at)
-        if operand.owner == old_term {
+        if operand.owner == old_term && (operand.kind == mir_operand_terminator_arg() || operand.kind == mir_operand_switch_case()) {
             if operand.kind == mir_operand_terminator_arg() {
                 var operand_target: U64 = 0
                 if operand.target != 0 && operand.target <= body.old_blocks { operand_target = __s0_buffer_get(U64, body.block_new, operand.target - 1) }
@@ -11476,14 +11476,16 @@ fn lower_step_build_resume(d: Domain, body0: LowerStepBodyRec, layout: LowerStep
     if out_part.owner != callee_frame { return Ok(lower_step_invalid_body(body)) }
     let out = try lower_step_load_field(d, body.state, body.function, body.after, child_place.id, out_part)
     body.state = out.state
-    let direct = __s0_buffer_get(MirFunctionRec, body.state.mir.functions, body.old_function - 1)
+    let call = lower_step_instr_by_id(body.state.mir, body.point_instruction)
+    var call_result_type = mir_type_unit()
+    if call.result != 0 { call_result_type = lower_step_value_by_ordinal(body.state.mir, body.old_function, call.result - 1).value_type }
     var owned: U64 = 0
-    if direct.result_type == mir_type_unit() {
+    if call_result_type == mir_type_unit() {
         let unit = try lower_step_const_get(d, body.state, body.function, body.after, body.unit_name, mir_type_unit())
         body.state = unit.state
         owned = unit.id
     } else {
-        let copy = try lower_step_new_instr_value(d, body.state, body.function, body.after, direct.result_type)
+        let copy = try lower_step_new_instr_value(d, body.state, body.function, body.after, call_result_type)
         body.state = copy.state
         let copied = try lower_add_instr(d, body.state, body.function, body.after, mir_op_copy_to_domain(), copy.id, 0, 0, body.results_param, out.id, 0, "")
         body.state = copied.state
@@ -11492,7 +11494,6 @@ fn lower_step_build_resume(d: Domain, body0: LowerStepBodyRec, layout: LowerStep
     let destroyed = try lower_add_instr(d, body.state, body.function, body.after, mir_op_domain_destroy(), 0, 0, 0, y.id, 0, 0, "")
     body.state = destroyed.state
     var override = try lower_step_zero_map(d, lower_step_direct_value_count(body.state.mir, body.old_function) + 1)
-    let call = lower_step_instr_by_id(body.state.mir, body.point_instruction)
     if call.result != 0 && call.result <= __s0_buffer_len(U64, override) { __s0_buffer_set(U64, override, call.result - 1, owned) }
     var at: U64 = 0
     while at < layout.d_count {
@@ -11769,6 +11770,10 @@ fn lower_step_build_all(d: Domain, source_state: State, spans: __s0_Buffer(Check
 
 fn lower_step_functions(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState) -> Result(LowerState, __s0_Error) {
     if !io_contract_present(source_state) { return Ok(state) }
+    // Step lowering is inspectable in the private compiler profile while the
+    // generated C thunks and async entry are still being built; public builds
+    // keep the direct bodies so a step module is never compiled without them.
+    if !check_bootstrap_private() { return Ok(state) }
     let base = try lower_step_flags_base(d, source_state, store)
     if __s0_buffer_len(U64, base.flags) == 0 { return Ok(state) }
     // Gate 9.3 splits handoffs to step instances. The module-private
@@ -11779,7 +11784,10 @@ fn lower_step_functions(d: Domain, source_state: State, spans: __s0_Buffer(Check
         let expression = __s0_buffer_get(CheckedExprRec, store.expressions, at)
         if expression.annotation != 0 && expression.annotation <= __s0_buffer_len(CallAnnotationRec, store.call_annotations) {
             let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, expression.annotation - 1)
-            if annotation.kind == 1 && annotation.suspends == 1 && (annotation.target == 0 || annotation.target > __s0_buffer_len(SymbolRec, store.symbols) || !lower_step_flat_get(base.flags, 0, annotation.target - 1)) { return Ok(state) }
+            if annotation.kind == 1 && annotation.suspends == 1 && annotation.target >= 1 && annotation.target <= __s0_buffer_len(SymbolRec, store.symbols) {
+                let symbol = __s0_buffer_get(SymbolRec, store.symbols, annotation.target - 1)
+                if symbol_name_matches_word(source_state, symbol, "await_result") { return Ok(state) }
+            }
         }
         at = at + 1
     }
