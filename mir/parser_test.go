@@ -301,6 +301,7 @@ var invalidParseTests = []struct {
 	{"missing binding on producing op", "mir 1\nfn @f() {\nbb0:\n  cleanup.scope.begin\n  return\n}\n", "produces a value"},
 	{"checked op without else", "mir 1\nfn @f(%a: i64) {\nbb0:\n  %s = int.add.checked %a, %a\n  return\n}\n", "requires an 'else' failure edge"},
 	{"unknown operation", "mir 1\nfn @f() {\nbb0:\n  frobnicate\n  return\n}\n", "unknown operation"},
+	{"task.spawn in format 6", "mir 6\nfn @f() {\nbb0:\n  %x = task.spawn %g, @step, %f, %d\n  return\n}\n", "task.spawn requires MIR format version 7"},
 	{"unterminated string", "mir 1\nconst @k: i64 = \"abc\n", "unterminated string literal"},
 	{"bad string escape", "mir 1\nconst @k: i64 = \"\\q\"\n", "invalid string literal"},
 	{"int out of range", "mir 1\nconst @k: i64 = 99999999999999999999\n", "out of range"},

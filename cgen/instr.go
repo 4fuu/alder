@@ -118,6 +118,14 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 		b.WriteString("};\n")
 
 	case mir.OpDomainCreate:
+		if slot, ok := g.frameDomainSlots[[3]int{int(fnIndexOf(g.m, g.f)), int(blockIndexOf(g.f, blk)), instrIndexOf(blk, in)}]; ok {
+			frame := g.m.Types[g.f.Params[1].Type].Elem
+			expr := "((" + g.cType(frame) + " *)" + g.val(mir.ValueId(1)) + ".data)->alder_domain_" + strconv.Itoa(slot)
+			b.WriteString("  if (!alder_domain_init(&" + expr + ", " + g.valueExpr(in.Domain) +
+				")) { alder_runtime_panic(\"domain.create failed\"); }\n")
+			b.WriteString("  " + g.val(in.Result) + " = &" + expr + ";\n")
+			break
+		}
 		b.WriteString("  if (!alder_domain_init(&alder_domain_" + strconv.Itoa(g.domainUsed) +
 			", " + g.valueExpr(in.Domain) + ")) { alder_runtime_panic(\"domain.create failed\"); }\n")
 		b.WriteString("  " + g.val(in.Result) + " = &alder_domain_" + strconv.Itoa(g.domainUsed) + ";\n")
@@ -132,6 +140,14 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 
 	case mir.OpDomainDestroy:
 		b.WriteString("  alder_domain_destroy(" + g.valueExpr(in.Domain) + ");\n")
+
+	case mir.OpTaskSpawn:
+		task := g.tmp(in, "task")
+		b.WriteString("  AlderTask *" + task + " = alder_task_create(" + g.valueExpr(in.A) +
+			", alder_spawnwrap_" + strconv.Itoa(int(in.Callee)) + ", (void *)" +
+			g.valueExpr(in.B) + ".data, " + g.valueExpr(in.Domain) + ");\n")
+		b.WriteString("  alder_task_start(" + task + ");\n")
+		b.WriteString("  " + g.val(in.Result) + " = alder_task_handle(" + task + ");\n")
 
 	case mir.OpAlloc:
 		elem := in.TypeOp

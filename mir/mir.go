@@ -18,7 +18,12 @@ const (
 	// BindingFormatVersion introduced C binding blocks, the c_* raw type
 	// vocabulary, c.call.unsafe, and c.is_null.
 	BindingFormatVersion = 6
-	// CurrentFormatVersion is the format emitted by newly constructed modules.
+	// TaskFormatVersion introduced task.spawn. It is the only MIR 7
+	// feature: a module without task.spawn keeps its MIR 6 header, and a
+	// module that contains the operation prints MIR 7.
+	TaskFormatVersion = 7
+	// CurrentFormatVersion is the format emitted by newly constructed
+	// modules that do not use task.spawn.
 	CurrentFormatVersion = BindingFormatVersion
 )
 

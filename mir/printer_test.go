@@ -3,6 +3,7 @@ package mir
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -263,6 +264,34 @@ bb0:
 	}
 	if m.Functions[id].Blocks[0].Instrs[0].TypeOp != FnValueDomainMarker {
 		t.Fatalf("fn.value domain marker did not parse as the sentinel")
+	}
+}
+
+func TestTaskSpawnVersionAndRoundTrip(t *testing.T) {
+	path := filepath.Join("verify", "testdata", "verify", "accept", "task-spawn.mir")
+	text, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := Parse(string(text))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	out := Print(m)
+	if !strings.HasPrefix(out, "mir 7\n") {
+		t.Fatalf("task.spawn module header:\n%s", out)
+	}
+	// The printer upgrades a MIR 6 module that contains the operation.
+	m.FormatVersion = BindingFormatVersion
+	if got := Print(m); !strings.HasPrefix(got, "mir 7\n") {
+		t.Fatalf("constructed task.spawn module header:\n%s", got)
+	}
+	reparsed, err := Parse(out)
+	if err != nil {
+		t.Fatalf("reparse: %v", err)
+	}
+	if again := Print(reparsed); again != out {
+		t.Fatalf("task.spawn round trip:\n--- first ---\n%s\n--- second ---\n%s", out, again)
 	}
 }
 

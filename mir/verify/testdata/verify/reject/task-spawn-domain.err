@@ -1,0 +1,2 @@
+fn @__alder_step.run.spawner: block bb_entry: op task.spawn #11: domain operand: expected domain_handle, got i64
+fn @__alder_step.run.spawner: block bb_entry: op task.spawn #11: frame operand must be allocated in the domain operand

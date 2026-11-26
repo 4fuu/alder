@@ -763,7 +763,10 @@ func frameTypingErrors(m *mir.Module, inv *frameInventory) []Error {
 						errs = append(errs, Error{Loc: loc, Msg: "%frame may only be the base of a deref field place"})
 						continue
 					}
-					if views[v] && in.Op != mir.OpStore {
+					// task.spawn hands one fresh child frame view to the task
+					// runtime; the borrow contract lives in the lowering, so
+					// the view escape rule must not reject the spawn site.
+					if views[v] && in.Op != mir.OpStore && !(in.Op == mir.OpTaskSpawn && v == in.B) {
 						errs = append(errs, Error{Loc: loc, Msg: "a frame view may not escape its activation"})
 					}
 				}

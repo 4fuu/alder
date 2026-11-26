@@ -602,6 +602,17 @@ fn mir_v5_aggregate_matches(store: MirStore, indexes: MirVIndexes, function: U64
     return true
 }
 
+// task.spawn target: a reserved step function whose second parameter is the
+// frame view. Phase 2 has already validated the pinned step signature, so the
+// run-name prefix and the parameter type suffice here.
+fn mir_v5_task_spawn_frame(store: MirStore, indexes: MirVIndexes, target: U64) -> U64 {
+    if target == 0 || target > __s0_buffer_len(MirFunctionRec, store.functions) { return 0 }
+    let rec = __s0_buffer_get(MirFunctionRec, store.functions, target - 1)
+    if !mir_vframe_prefix(store, rec.name_start, rec.name_end, mir_vframe_run_prefix()) { return 0 }
+    if mir_v5_function_param_count(store, indexes, target) != 3 { return 0 }
+    return mir_v5_param_type(store, indexes, target, 0, mir_param_function(), 1)
+}
+
 fn mir_v5_infer(store: MirStore, indexes: MirVIndexes, id: U64, x: MirInstrRec) -> MirVTypeResult {
     let ta = mir_v5_value_type(store, indexes, x.function, x.a)
     let tb = mir_v5_value_type(store, indexes, x.function, x.b)
@@ -625,6 +636,9 @@ return MirVTypeResult(valid: p.valid, type_id: mir_v5_find_unary(indexes, mir_ty
     if x.op == mir_op_c_field_get() { return mir_v5_c_field_result(store, indexes, x, ta) }
     if x.op == mir_op_c_string_make_lit() || x.op == mir_op_c_string_make() || x.op == mir_op_c_string_ptr() { return mir_v5_c_string_result(store, indexes, x, ta) }
     if x.op == mir_op_c_buffer_ptr() { return mir_v5_c_buffer_result(store, x, ta) }
+    if x.op == mir_op_task_spawn() { let frame = mir_v5_task_spawn_frame(store, indexes, x.target)
+        let valid = frame != 0 && ta == mir_type_u64() && tb == frame && mir_v5_value_type(store, indexes, x.function, x.c) == mir_v5_find_kind(indexes, mir_type_kind_domain_handle())
+        return MirVTypeResult(valid: valid, type_id: mir_type_u64()) }
     if x.op == mir_op_c_zero() { return mir_v5_c_zero_result(store, x) }
     if x.op == mir_op_type_size() || x.op == mir_op_type_align() { return mir_v5_type_query_result(store, x) }
     if x.op == mir_op_hash_value() { return mir_v5_hash_result(store, indexes, x) }
@@ -827,6 +841,26 @@ if !mir_v5_binding_arg_ok(store, mir_v5_value_type(store, indexes, x.function, o
 n = n + 1 }
 return Ok(result) }
 
+// task.spawn operand rules: the group is u64, the domain is a handle, the
+// frame view matches the target step's frame parameter, and the frame is the
+// direct one-element allocation in that same domain. The task-record borrow is
+// a lowering contract, not an extra verifier fact.
+fn mir_v5_task_spawn_operands(d: Domain, store: MirStore, indexes: MirVIndexes, out: __s0_Buffer(MirVerifyDiagRec), id: U64, x: MirInstrRec) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+    var result = out
+    result = try mir_v5_expect(d, store, indexes, result, x.function, x.block, id, 0, 0, x.a, mir_type_u64())
+    result = try mir_v5_expect(d, store, indexes, result, x.function, x.block, id, 0, 0, x.c, mir_v5_find_kind(indexes, mir_type_kind_domain_handle()))
+    let frame = mir_v5_task_spawn_frame(store, indexes, x.target)
+    if frame == 0 { return mir_v5_bad(d, result, mir_vdiag_bad_operand_type(), x.function, x.block, id, 0, 0, mir_type_kind_safe_mut(), 0, x.target) }
+    let actual = mir_v5_value_type(store, indexes, x.function, x.b)
+    if actual != frame { return mir_v5_bad(d, result, mir_vdiag_bad_operand_type(), x.function, x.block, id, 0, 0, frame, actual, x.b) }
+    let fi = mir_vframe_def_instr(store, indexes, x.function, x.b)
+    if fi == 0 || fi > __s0_buffer_len(MirInstrRec, store.instructions) { return mir_v5_bad(d, result, mir_vdiag_bad_operand_type(), x.function, x.block, id, 0, 0, 1, 0, x.b) }
+    let alloc = __s0_buffer_get(MirInstrRec, store.instructions, fi - 1)
+    if (alloc.op != mir_op_alloc() && alloc.op != mir_op_alloc_checked()) || !mir_vframe_const_one(store, indexes, x.function, alloc.b) { return mir_v5_bad(d, result, mir_vdiag_bad_operand_type(), x.function, x.block, id, 0, 0, 1, 0, x.b) }
+    if alloc.a != x.c { return mir_v5_bad(d, result, mir_vdiag_bad_operand_type(), x.function, x.block, id, 0, 0, mir_type_kind_domain_handle(), 0, x.b) }
+    return Ok(result)
+}
+
 fn mir_v5_instruction(d: Domain, store: MirStore, indexes: MirVIndexes, out: __s0_Buffer(MirVerifyDiagRec), id: U64, x: MirInstrRec) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
     var result = out
 let baseline = __s0_buffer_len(MirVerifyDiagRec, out)
@@ -931,6 +965,7 @@ if !(mir_v5_is_int(ta) && mir_v5_is_int(x.type_op)) { result = try mir_v5_bad(d,
     if x.op == mir_op_c_field_get() || x.op == mir_op_c_field_set() { result = try mir_v5_c_field_operands(d, store, indexes, result, x, id) }
     if x.op == mir_op_c_string_make_lit() || x.op == mir_op_c_string_make() || x.op == mir_op_c_string_ptr() || x.op == mir_op_c_string_release() { result = try mir_v5_c_string_operands(d, store, indexes, result, x, id) }
     if x.op == mir_op_c_buffer_ptr() { if !mir_v5_c_buffer_result(store, x, mir_v5_value_type(store, indexes, x.function, x.a)).valid { result = try mir_v5_bad(d, result, mir_vdiag_bad_operand_type(), x.function, x.block, id, 0, 0, mir_type_kind_bytes(), mir_vtype_kind(store, mir_v5_value_type(store, indexes, x.function, x.a)), x.a) } }
+    if x.op == mir_op_task_spawn() { result = try mir_v5_task_spawn_operands(d, store, indexes, result, id, x) }
     if x.op == mir_op_str_len() || x.op == mir_op_str_to_bytes() || x.op == mir_op_str_byte_checked() { let k = mir_vtype_kind(store, mir_v5_value_type(store, indexes, x.function, x.a))
 if k != mir_type_kind_string() && k != mir_type_kind_bytes() { result = try mir_v5_bad(d, result, mir_vdiag_bad_operand_type(), x.function, x.block, id, 0, 0, mir_type_kind_string(), k, x.a) }
 if x.op == mir_op_str_byte_checked() { result = try mir_v5_expect(d, store, indexes, result, x.function, x.block, id, 0, 0, x.b, mir_type_u64()) } }

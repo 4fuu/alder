@@ -30,7 +30,7 @@ func phase5Typing(m *mir.Module) []Error {
 				continue
 			}
 			for i := range b.Instrs {
-				errs = append(errs, checkInstrTypes(m, f, b, i, &b.Instrs[i])...)
+				errs = append(errs, checkInstrTypes(m, f, b, i, &b.Instrs[i], frames)...)
 			}
 			errs = append(errs, checkTermTypes(m, f, b)...)
 		}
@@ -81,7 +81,7 @@ func (c *typeChecker) expectSamePair(a, b mir.ValueId, what string, ok func(mir.
 	}
 }
 
-func checkInstrTypes(m *mir.Module, f *mir.Function, b *mir.Block, i int, in *mir.Instr) []Error {
+func checkInstrTypes(m *mir.Module, f *mir.Function, b *mir.Block, i int, in *mir.Instr, frames *frameInventory) []Error {
 	c := &typeChecker{loc: locInstr(f, b, i, in), m: m, f: f}
 	errBaseline := len(c.errs)
 
@@ -224,6 +224,34 @@ func checkInstrTypes(m *mir.Module, f *mir.Function, b *mir.Block, i int, in *mi
 			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "c.buffer.ptr result type is not a C pointer"})
 		} else if !m.IsCBytePointee(pointer.Elem) {
 			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "c.buffer.ptr pointee is not byte-addressable"})
+		}
+
+	case mir.OpTaskSpawn:
+		c.expectExact(in.A, "group operand", mir.TypeU64)
+		c.expectExact(in.Domain, "domain operand", m.DomainHandle())
+		if int(in.Callee) >= len(m.Functions) || m.Functions[in.Callee] == nil {
+			break
+		}
+		step := frames.frameStepOf(m.Functions[in.Callee])
+		if step == nil {
+			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "task.spawn target must be a step function"})
+			break
+		}
+		frameType, ok := f.ValueType(in.B)
+		if !ok || frameType == mir.NoType {
+			break
+		}
+		c.expectExact(in.B, "frame operand", step.fn.Params[1].Type)
+		if frameType != step.fn.Params[1].Type {
+			break
+		}
+		alloc := frameDefiningInstr(f, in.B)
+		if alloc == nil || (alloc.Op != mir.OpAlloc && alloc.Op != mir.OpAllocChecked) || !frameConstantOne(m, f, alloc.Count) {
+			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "frame operand must be a one-element allocation in the domain operand"})
+			break
+		}
+		if alloc.Domain != in.Domain {
+			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "frame operand must be allocated in the domain operand"})
 		}
 
 	case mir.OpTypeSize, mir.OpTypeAlign:

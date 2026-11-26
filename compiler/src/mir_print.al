@@ -1225,6 +1225,7 @@ fn mir_instruction_operands_valid(idx: MirPrintIndex, store: MirStore, id: U64, 
     // released buffer for release.
     if rec.op >= mir_op_c_string_make_lit() && rec.op <= mir_op_c_string_release() && !mir_value_valid(idx, store, rec.function, rec.a) { return false }
     if rec.op == mir_op_c_buffer_ptr() && (!mir_value_valid(idx, store, rec.function, rec.a) || !mir_type_valid(store, rec.type_op)) { return false }
+    if rec.op == mir_op_task_spawn() && (!mir_value_valid(idx, store, rec.function, rec.a) || !mir_value_valid(idx, store, rec.function, rec.b) || !mir_value_valid(idx, store, rec.function, rec.c) || !mir_vid_valid(rec.target, __s0_buffer_len(MirFunctionRec, store.functions))) { return false }
     if rec.op == mir_op_hash_value() && (!mir_value_valid(idx, store, rec.function, rec.a) || !mir_value_valid(idx, store, rec.function, rec.b) || !mir_value_valid(idx, store, rec.function, rec.c) || !mir_type_valid(store, rec.type_op)) { return false }
     if (rec.op == mir_op_c_zero() || rec.op == mir_op_type_size() || rec.op == mir_op_type_align()) && !mir_type_valid(store, rec.type_op) { return false }
     if rec.op == mir_op_c_addr() {
@@ -1525,7 +1526,7 @@ fn mir_validate_operands(idx: MirPrintIndex, store: MirStore) -> Bool {
 }
 
 fn mir_store_valid(idx: MirPrintIndex, store: MirStore) -> Bool {
-    if mir_format_version() != 6 || !mir_validate_types(idx, store) || !mir_validate_declarations(idx, store) || !mir_validate_functions(idx, store) || !mir_validate_places(idx, store) { return false }
+    if !mir_validate_types(idx, store) || !mir_validate_declarations(idx, store) || !mir_validate_functions(idx, store) || !mir_validate_places(idx, store) { return false }
     var at: U64 = 0
     while at < __s0_buffer_len(MirInstrRec, store.instructions) {
         let rec = __s0_buffer_get(MirInstrRec, store.instructions, at)
@@ -1956,7 +1957,8 @@ fn mir_out_op(op: U64) -> Bool {
     if op == 105 { return out_string("int.xor") }
     if op == 106 { return out_string("int.not") }
     if op == 107 { return out_string("c.buffer.ptr") }
-    if op == 108 { return out_string("slice.to_bytes") }
+    if op == 108 { return out_string("task.spawn") }
+    if op == 120 { return out_string("slice.to_bytes") }
     if op == 109 { return out_string("c.zero") }
     if op == 110 { return out_string("c.addr") }
     if op == 111 { return out_string("c.callback.make") }
@@ -2147,6 +2149,9 @@ fn mir_out_instruction(idx: MirPrintIndex, store: MirStore, id: U64, rec: MirIns
     }
     if rec.op == mir_op_c_buffer_ptr() {
         if !out(32) || !mir_out_value(idx, store, rec.function, rec.a) || !out_string(", ") || !mir_out_type(idx, store, rec.type_op, __s0_buffer_len(MirTypeRec, store.types) + 1) { return false }
+    }
+    if rec.op == mir_op_task_spawn() {
+        if !out(32) || !mir_out_value(idx, store, rec.function, rec.a) || !out_string(", @") || !mir_out_function_name(store, rec.target) || !out_string(", ") || !mir_out_value(idx, store, rec.function, rec.b) || !out_string(", ") || !mir_out_value(idx, store, rec.function, rec.c) { return false }
     }
     if rec.op == mir_op_c_zero() || rec.op == mir_op_type_size() || rec.op == mir_op_type_align() {
         if !out(32) || !mir_out_type(idx, store, rec.type_op, __s0_buffer_len(MirTypeRec, store.types) + 1) { return false }
@@ -2667,7 +2672,18 @@ fn mir_print(d: Domain, store: MirStore) -> Bool {
     }
 }
 
+// The header preserves the module's format: task.spawn is the only MIR 7
+// feature, so every other module keeps the MIR 6 header.
+fn mir_print_version(store: MirStore) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirInstrRec, store.instructions) {
+        if __s0_buffer_get(MirInstrRec, store.instructions, at).op == mir_op_task_spawn() { return mir_task_format_version() }
+        at = at + 1
+    }
+    return mir_binding_format_version()
+}
+
 fn mir_print_indexed(idx: MirPrintIndex, store: MirStore) -> Bool {
     if !mir_store_valid(idx, store) { return false }
-    return out_string("mir 6\n") && mir_out_type_declarations(idx, store) && mir_out_declarations(idx, store) && mir_out_bindings(idx, store) && mir_out_functions(idx, store)
+    return out_string("mir ") && mir_out_u64(mir_print_version(store)) && out_string("\n") && mir_out_type_declarations(idx, store) && mir_out_declarations(idx, store) && mir_out_bindings(idx, store) && mir_out_functions(idx, store)
 }

@@ -1515,6 +1515,30 @@ fn cgen_convert_int_total(store: MirStore, src_id: U64, dst_id: U64) -> Bool {
     return false
 }
 
+// One task.spawn site: create the task with the target step thunk, start it,
+// and read the child id through alder_task_handle. The spawner keeps ownership
+// of the frame and domain; the task record borrows both until release.
+fn cgen_emit_task_spawn(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, item: MirInstrRec) -> Result(CgenWriter, __s0_Error) {
+    var out = initial
+    out = try cgen_put(d, out, "  AlderTask *")
+    out = try cgen_put_tmp(d, out, item.result, "task")
+    out = try cgen_put(d, out, " = alder_task_create(")
+    out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+    out = try cgen_put(d, out, ", ")
+    out = try cgen_put_step_name(d, out, store, item.target)
+    out = try cgen_put(d, out, ", (void *)")
+    out = try cgen_put_value_read(d, out, store, indexes, item.function, item.b)
+    out = try cgen_put(d, out, ".data, ")
+    out = try cgen_put_value_read(d, out, store, indexes, item.function, item.c)
+    out = try cgen_put(d, out, ");\n  alder_task_start(")
+    out = try cgen_put_tmp(d, out, item.result, "task")
+    out = try cgen_put(d, out, ");\n  ")
+    out = try cgen_put_value(d, out, item.result)
+    out = try cgen_put(d, out, " = alder_task_handle(")
+    out = try cgen_put_tmp(d, out, item.result, "task")
+    return cgen_put(d, out, ");\n")
+}
+
 fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, instruction: U64, item: MirInstrRec) -> Result(CgenWriter, __s0_Error) {
     var out = initial
     if item.op == mir_op_load() {
@@ -2386,6 +2410,7 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
     if item.op >= mir_op_c_num_try() && item.op <= mir_op_c_num_cast() { return cgen_emit_c_convert(d, out, store, indexes, instruction, item) }
     if item.op >= mir_op_c_string_make_lit() && item.op <= mir_op_c_string_release() { return cgen_emit_c_string_op(d, out, store, indexes, instruction, item) }
     if item.op == mir_op_c_buffer_ptr() { return cgen_emit_c_buffer_ptr(d, out, store, indexes, instruction, item) }
+    if item.op == mir_op_task_spawn() { return cgen_emit_task_spawn(d, out, store, indexes, item) }
     if item.op == mir_op_c_zero() { return cgen_emit_c_zero(d, out, store, indexes, instruction, item) }
     if item.op == mir_op_type_size() || item.op == mir_op_type_align() { return cgen_emit_type_query(d, out, store, item) }
     if item.op == mir_op_hash_value() { return cgen_emit_hash_value(d, out, store, indexes, item) }

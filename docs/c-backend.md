@@ -503,8 +503,14 @@ Failure contracts:
 
 `alder_task_create` plus `alder_task_start` is the two-phase form used by the
 spawn lowering; the `task.spawn` MIR operation of MIR 7 is their typed front
-end. The lowering obtains the child id with `alder_task_handle(task)`, not
-`alder_task_id`. The task record, activation stack, latch, shield, timer
+end. The lowering emits, in order,
+`alder_task_create(group, root_step, frame.data, domain)`,
+`alder_task_start(task)`, and `alder_task_handle(task)`. `root_step` is the
+generated `alder_step_*` thunk for the target, and `frame.data` is the
+one-element view's data pointer. The lowering obtains the child id with
+`alder_task_handle(task)`, not `alder_task_id`; the spawner retains ownership
+of the domain and frame and destroys the domain only after
+`alder_task_release`. The task record, activation stack, latch, shield, timer
 links, and cancel flag are runtime state; none is visible to MIR as a value.
 
 The `group` argument is an opaque 64-bit runtime group id supplied by the

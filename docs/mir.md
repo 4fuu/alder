@@ -1583,7 +1583,11 @@ task.spawn %group, @__alder_step.run.<instance>, %frame, %domain -> u64
 binding; the group record owns the child list and cancellation state, and its
 public API lands with gate 9.4. The target is a step function whose
 frame type is the element type of `%frame`; `%frame` is the one-element
-`safe_mut` allocated in `%domain`; `%domain` is the activation domain. The
+`safe_mut` allocated in `%domain`; `%domain` is the activation domain.
+Verification requires the group to be `u64`, the domain to be a
+`domain_handle`, the frame to be exactly the target's `safe_mut` frame view,
+and that view to be the direct `alloc` result with the constant count 1 in
+that same domain. The
 operation creates a task record, pushes the target as its root activation,
 makes the task runnable, and returns a generational task id. At the C level it
 lowers to `alder_task_create`, then `alder_task_start`, then
@@ -1613,8 +1617,8 @@ The worked example above contains no spawn site and stays `mir 6`.
 
 ## Textual MIR
 
-The current textual format is `mir 6`; the parser and verifier retain legacy
-`mir 1` through `mir 5` support. Each version admits only its documented
+The newest textual format is `mir 7`; the parser and verifier retain legacy
+`mir 1` through `mir 6` support. Each version admits only its documented
 features, so a module under an older header is rejected rather than silently
 changed. Function headers are predeclared
 in textual order before function bodies are parsed, so calls and cleanup
@@ -1623,7 +1627,9 @@ values remain textual declaration order. Named types, constants, and imports
 still require declaration before use, including from function bodies. The
 parser otherwise requires declarations before uses, one statement per line,
 and deterministic name resolution. The printer preserves the parsed version
-and emits the current version for newly constructed modules. Printing a
+and emits `mir 7` only when a module contains `task.spawn`; a module without
+the operation keeps the `mir 6` header, and newly constructed modules default
+to `mir 6`. Printing a
 canonical golden fixture reproduces it byte for byte, while comments and
 noncanonical layout are intentionally normalized. Parse-print-parse reaches a
 stable fixed point for every MIR fixture. `#` starts a line comment.
@@ -1822,19 +1828,20 @@ The verifier's structural rules for bindings:
 Textual MIR carries an explicit format version. `mir 1` remains a stable legacy
 format; `mir 2` adds only valueless `panic`; `mir 3` adds `alloc.checked`;
 `mir 4` adds `vec(T)` and the minimal Vec operations; `mir 5` adds
-function-type environments, `fn.value`, and `call.value`; and current `mir 6`
-adds C binding blocks, the `c_*` raw type vocabulary, `c.call.unsafe`,
+function-type environments, `fn.value`, and `call.value`; `mir 6` adds C
+binding blocks, the `c_*` raw type vocabulary, `c.call.unsafe`,
 `c.is_null`, the integer overflow method operations (71-79), the
 byte-sequence method operations (80-85), the integer conversion method
 operations (86-87), the C scalar conversion method operations (88-90), the float arithmetic
 operations (91-94), the ordering comparison operation (95), the C
 record field operations (96-97), the C-string ownership operations (98-101),
 the display operation (102), the total bitwise operations (103-106), and the
-call-scoped buffer borrow (107). `mir 7` is reserved for the task surface's
-single new operation, `task.spawn` (108), pinned in
+call-scoped buffer borrow (107). `mir 7` adds the task surface's single new
+operation, `task.spawn` (108), pinned in
 [Suspending Instances and Step Frames](#suspending-instances-and-step-frames);
-it lands with gate 9.4 and changes nothing else in the format. Step frames,
-state enums, and the direct/step split use only `mir 6` syntax.
+it changes nothing else in the format. Step frames,
+state enums, and the direct/step split use only `mir 6` syntax, so a module
+containing them but no spawn site stays `mir 6`.
 Incompatible changes must use a new version and update:
 
 - this document;

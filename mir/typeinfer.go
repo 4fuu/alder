@@ -633,6 +633,27 @@ func (m *Module) InferResultType(f *Function, in *Instr) (TypeId, bool) {
 		}
 		return in.TypeOp, true
 
+	case OpTaskSpawn:
+		// The group is a u64 runtime id, the frame is the target step's
+		// one-element safe_mut view, and the domain is a domain handle.
+		// Allocation provenance and the reserved-step check are phase-5
+		// rules; this shape decides the u64 result.
+		if !m.isU64(f, in.A) || !m.isHandleType(f, in.Domain) {
+			return NoType, false
+		}
+		if int(in.Callee) >= len(m.Functions) || m.Functions[in.Callee] == nil {
+			return NoType, false
+		}
+		frame, ok := f.ValueType(in.B)
+		if !ok || !m.ValidType(frame) || m.Types[frame].Kind != TypeSafeMut {
+			return NoType, false
+		}
+		callee := m.Functions[in.Callee]
+		if len(callee.Params) != 3 || callee.Params[1].Type != frame {
+			return NoType, false
+		}
+		return TypeU64, true
+
 	case OpTypeSize, OpTypeAlign:
 		if !m.ValidType(in.TypeOp) {
 			return NoType, false

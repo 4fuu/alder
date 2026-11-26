@@ -200,6 +200,13 @@ const (
 	// operand is bytes or a u8 slice and TypeOp names the declared C pointer
 	// type; the pointer never becomes an ordinary value.
 	OpCBufferPtr OpKind = 107
+	// OpTaskSpawn creates and starts one task whose root activation is the
+	// reserved step function Callee. A is the u64 group id, B is the
+	// one-element safe_mut frame allocated in Domain, and Domain is the
+	// activation domain the task borrows until release. The result is the
+	// child's u64 task id from alder_task_handle; the spawner keeps domain
+	// ownership.
+	OpTaskSpawn OpKind = 108
 	// OpSliceToBytes copies a byte view into fresh bytes storage in the
 	// domain operand. Allocation failure takes the failure edge.
 	OpSliceToBytes OpKind = 120
@@ -449,6 +456,8 @@ func (k OpKind) String() string {
 		return "int.not"
 	case OpCBufferPtr:
 		return "c.buffer.ptr"
+	case OpTaskSpawn:
+		return "task.spawn"
 	case OpSliceToBytes:
 		return "slice.to_bytes"
 	case OpCZero:

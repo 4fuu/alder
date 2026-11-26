@@ -122,8 +122,8 @@ func (p *parser) parseModule() error {
 	if err != nil {
 		return p.errf(vt, "invalid format version %q", vt.text)
 	}
-	if n < LegacyFormatVersion || n > CurrentFormatVersion {
-		return p.errf(vt, "unsupported format version %d (supported: 1, 2, 3, 4)", n)
+	if n < LegacyFormatVersion || n > TaskFormatVersion {
+		return p.errf(vt, "unsupported format version %d (supported: 1, 2, 3, 4, 5, 6, 7)", n)
 	}
 	p.m.FormatVersion = n
 
@@ -1614,6 +1614,40 @@ func (p *parser) parseOp() (Instr, error) {
 			return in, err
 		}
 		err = p.expectPunct(")")
+
+	case "task.spawn":
+		if p.m.FormatVersion < TaskFormatVersion {
+			return in, p.errf(t, "task.spawn requires MIR format version %d", TaskFormatVersion)
+		}
+		in.Op = OpTaskSpawn
+		in.A, err = p.parseValueRef()
+		if err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		fnTok, err := p.expectAtName("a step function name")
+		if err != nil {
+			return in, err
+		}
+		id, ok := p.m.Function(fnTok.text)
+		if !ok {
+			return in, p.errf(fnTok, "unknown function @%s", fnTok.text)
+		}
+		in.Callee = id
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		in.B, err = p.parseValueRef()
+		if err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		in.Domain, err = p.parseValueRef()
+		return in, err
 
 	case "call.value":
 		if p.m.FormatVersion < ClosureFormatVersion {

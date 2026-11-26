@@ -289,7 +289,7 @@ func TestAlderMIRCoreConformance(t *testing.T) {
 		t.Fatalf("strict C11 compile: %v\n%s", compileErr, output)
 	}
 	want := "ALDER-MIR-CONTRACT 5\n" +
-		fmt.Sprintf("K %d\n", mir.BindingFormatVersion) +
+		fmt.Sprintf("K %d\n", mir.TaskFormatVersion) +
 		"TK 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25\n" +
 		"PR 1 2 3 4 5 6 7 8 9 10 11 12\n" +
 		"PT 1 2 3 4 5\nCK 0 1 2 3 4\nPK 1 2\nVD 0 1 2 3\nPL 0 1 2\n" +
@@ -337,7 +337,7 @@ func validateMIRContractManifest(t *testing.T, text string) {
 	}
 	seen := make(map[string]bool, len(want))
 	lines := strings.Split(text, "\n")
-	wantFormat := fmt.Sprintf("K %d", mir.BindingFormatVersion)
+	wantFormat := fmt.Sprintf("K %d", mir.TaskFormatVersion)
 	if len(lines) < 12 || lines[0] != "ALDER-MIR-CONTRACT 5" || lines[1] != wantFormat {
 		t.Fatalf("invalid MIR contract manifest envelope:\n%s", text)
 	}

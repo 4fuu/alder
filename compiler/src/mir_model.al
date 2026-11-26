@@ -7,7 +7,9 @@
 // Builders append but do not validate or normalize records, so rejection tests
 // may construct malformed raw stores.
 
-fn mir_format_version() -> U64 { return 6 }
+fn mir_format_version() -> U64 { return 7 }
+fn mir_binding_format_version() -> U64 { return 6 }
+fn mir_task_format_version() -> U64 { return 7 }
 
 // TypeKind values match mir/types.go exactly. Primitive Type IDs are external
 // IDs 1..12 in the fixed Go order unit, bool, i8, i16, i32, i64, u8, u16,
@@ -206,6 +208,9 @@ fn mir_op_int_not() -> U64 { return 106 }
 // One call-scoped borrow of an Alder buffer as a C pointer. The operand is
 // bytes, slice(u8), or safe_mut(u8); type_op is the declared c pointer type.
 fn mir_op_c_buffer_ptr() -> U64 { return 107 }
+// task.spawn: a = u64 group id, b = one-element safe_mut frame, c = activation
+// domain, target = reserved step function. The result is the child task id.
+fn mir_op_task_spawn() -> U64 { return 108 }
 // [U8].to_bytes copies a byte view into fresh bytes storage in the domain
 // operand a; operand b is the slice. Allocation failure takes the edge.
 fn mir_op_slice_to_bytes() -> U64 { return 120 }

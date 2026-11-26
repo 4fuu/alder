@@ -11,8 +11,8 @@ import (
 // consistent value definitions.
 func phase1Integrity(m *mir.Module) []Error {
 	var errs []Error
-	if m.FormatVersion < mir.LegacyFormatVersion || m.FormatVersion > mir.CurrentFormatVersion {
-		errs = append(errs, Error{Msg: fmt.Sprintf("unsupported format version %d (supported: 1, 2, 3, 4, 5)", m.FormatVersion)})
+	if m.FormatVersion < mir.LegacyFormatVersion || m.FormatVersion > mir.TaskFormatVersion {
+		errs = append(errs, Error{Msg: fmt.Sprintf("unsupported format version %d (supported: 1, 2, 3, 4, 5, 6, 7)", m.FormatVersion)})
 	}
 	if len(m.Types) < int(mir.NumPrimitiveTypes) {
 		errs = append(errs, Error{Msg: fmt.Sprintf("type table has %d entries; expected at least %d canonical primitive slots", len(m.Types), mir.NumPrimitiveTypes)})
@@ -404,6 +404,9 @@ func checkInstr(m *mir.Module, f *mir.Function, b *mir.Block, bi, ii int, in *mi
 	if in.Op == mir.OpCall && (int(in.Callee) >= len(m.Functions) || m.Functions[in.Callee] == nil) {
 		errs = append(errs, Error{Loc: loc, Msg: "callee is nil or out of range"})
 	}
+	if in.Op == mir.OpTaskSpawn && (int(in.Callee) >= len(m.Functions) || m.Functions[in.Callee] == nil) {
+		errs = append(errs, Error{Loc: loc, Msg: "step function is nil or out of range"})
+	}
 	if in.Op == mir.OpFFICallUnsafe && int(in.FFIImport) >= len(m.Imports) {
 		errs = append(errs, Error{Loc: loc, Msg: "import out of range"})
 	}
@@ -415,6 +418,9 @@ func checkInstr(m *mir.Module, f *mir.Function, b *mir.Block, bi, ii int, in *mi
 	}
 	if in.Op == mir.OpCIsNull && m.FormatVersion < mir.BindingFormatVersion {
 		errs = append(errs, Error{Loc: loc, Msg: "c.is_null requires MIR format version 6"})
+	}
+	if in.Op == mir.OpTaskSpawn && m.FormatVersion < mir.TaskFormatVersion {
+		errs = append(errs, Error{Loc: loc, Msg: "task.spawn requires MIR format version 7"})
 	}
 	if (in.Op == mir.OpCZero || in.Op == mir.OpCAddr || in.Op == mir.OpTypeSize || in.Op == mir.OpTypeAlign || in.Op == mir.OpHashValue) && m.FormatVersion < mir.BindingFormatVersion {
 		errs = append(errs, Error{Loc: loc, Msg: in.Op.String() + " requires MIR format version 6"})
@@ -543,6 +549,10 @@ func checkRequiredInstrOperands(m *mir.Module, in *mir.Instr, loc string) []Erro
 		require(in.A, "operand")
 	case mir.OpCBufferPtr:
 		require(in.A, "buffer operand")
+	case mir.OpTaskSpawn:
+		require(in.A, "group operand")
+		require(in.B, "frame operand")
+		require(in.Domain, "domain operand")
 	case mir.OpSliceLen:
 		require(in.Slice, "slice operand")
 	case mir.OpSliceIndexChecked:
@@ -701,6 +711,10 @@ func instrValueOperands(in *mir.Instr) []mir.ValueId {
 		add(in.A)
 	case mir.OpCBufferPtr:
 		add(in.A)
+	case mir.OpTaskSpawn:
+		add(in.A)
+		add(in.B)
+		add(in.Domain)
 	case mir.OpCAddr:
 		if in.Place.Kind == mir.PlaceDeref {
 			add(in.Place.Deref)

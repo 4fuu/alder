@@ -11,7 +11,7 @@ import (
 func Print(m *Module) string {
 	var b strings.Builder
 	b.WriteString("mir ")
-	b.WriteString(strconv.Itoa(m.FormatVersion))
+	b.WriteString(strconv.Itoa(printFormatVersion(m)))
 	b.WriteString("\n")
 
 	for i := NumPrimitiveTypes; i < TypeId(len(m.Types)); i++ {
@@ -285,6 +285,31 @@ func printArgs(b *strings.Builder, f *Function, args []ValueId) {
 	}
 }
 
+// printFormatVersion returns the header version: a parsed version is
+// preserved, and a module that contains task.spawn prints MIR 7 even when it
+// was constructed with the default MIR 6 header.
+func printFormatVersion(m *Module) int {
+	if m.FormatVersion >= TaskFormatVersion {
+		return m.FormatVersion
+	}
+	for _, f := range m.Functions {
+		if f == nil {
+			continue
+		}
+		for _, b := range f.Blocks {
+			if b == nil {
+				continue
+			}
+			for i := range b.Instrs {
+				if b.Instrs[i].Op == OpTaskSpawn {
+					return TaskFormatVersion
+				}
+			}
+		}
+	}
+	return m.FormatVersion
+}
+
 func printInstr(b *strings.Builder, m *Module, f *Function, in *Instr) {
 	b.WriteString("  ")
 	if in.Result != NoValue {
@@ -360,6 +385,10 @@ func printInstr(b *strings.Builder, m *Module, f *Function, in *Instr) {
 
 	case OpCBufferPtr:
 		b.WriteString(" " + valueName(f, in.A) + ", " + m.TypeString(in.TypeOp))
+
+	case OpTaskSpawn:
+		b.WriteString(" " + valueName(f, in.A) + ", @" + fnName(m, in.Callee) + ", " +
+			valueName(f, in.B) + ", " + valueName(f, in.Domain))
 
 	case OpCZero, OpTypeSize, OpTypeAlign:
 		b.WriteString(" " + m.TypeString(in.TypeOp))

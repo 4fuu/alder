@@ -40,6 +40,7 @@ fn mir_vop_required_mask(op: U64) -> U64 {
     if op == mir_op_str_len() || op == mir_op_str_to_bytes() { return 1 }
     if op == mir_op_str_byte_checked() || op == mir_op_str_from_bytes() { return 3 }
     if op == mir_op_c_buffer_ptr() { return 1 }
+    if op == mir_op_task_spawn() { return 39 }
     if op == mir_op_slice_to_bytes() { return 3 }
     if op == mir_op_c_zero() || op == mir_op_type_size() || op == mir_op_type_align() { return 16 }
     if op == mir_op_hash_value() { return 23 }
@@ -1128,7 +1129,7 @@ scan = scan + 1 }
             if i.op == mir_op_cleanup_push() && i.place != 0 { let owner_place = __s0_buffer_get(MirPlaceRec, store.places, i.place - 1)
                 if owner_place.function != i.function || (owner_place.kind != mir_place_local() && !mir_vframe_place_frame_field_noidx(store, i.function, i.place)) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reference(), i.function, i.block, id, 0, 0, 0, id, 0, 0, i.place)) } }
             if ((mask / 16) % 2 == 1) && !mir_vtype_exists(store, i.type_op) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reference(), i.function, i.block, id, 0, 0, i.type_op, id, 0, 0, i.type_op)) }
-            if (i.op == mir_op_call() || i.op == mir_op_cleanup_push()) && !mir_vid_valid(i.target, function_count) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reference(), i.function, i.block, id, 0, 0, 0, id, 0, 0, i.target)) }
+            if (i.op == mir_op_call() || i.op == mir_op_cleanup_push() || i.op == mir_op_task_spawn()) && !mir_vid_valid(i.target, function_count) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reference(), i.function, i.block, id, 0, 0, 0, id, 0, 0, i.target)) }
             if i.op == mir_op_ffi_call_unsafe() && !mir_vid_valid(i.target, __s0_buffer_len(MirImportRec, store.imports)) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reference(), i.function, i.block, id, 0, 0, 0, id, 0, 0, i.target)) }
             if i.result != 0 { var vi: U64 = 0
                 if i.function >= 1 && i.function <= function_count && i.result >= 1 && i.result <= v_counts[i.function] {
@@ -1139,6 +1140,7 @@ scan = scan + 1 }
                 if vi == 0 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reciprocal(), i.function, i.block, id, 0, 0, 0, id, 1, 0, i.result)) } else { let v = __s0_buffer_get(MirValueRec, store.values, vi - 1)
 if v.def_kind != mir_value_def_instruction() || v.block != i.block || v.item != i.ordinal + 1 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reciprocal(), i.function, i.block, id, 0, 0, 0, id, i.ordinal + 1, v.item, i.result)) } } }
             if i.op == mir_op_alloc_checked() && version < 3 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_version_gate(), i.function, i.block, id, 0, 0, 0, id, 3, version, 0)) }
+            if i.op == mir_op_task_spawn() && version < 7 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_version_gate(), i.function, i.block, id, 0, 0, 0, id, 7, version, 0)) }
             if i.op >= mir_op_vec_new() && version < 4 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_version_gate(), i.function, i.block, id, 0, 0, 0, id, 4, version, 0)) }
         }
         at = at + 1

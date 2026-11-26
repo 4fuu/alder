@@ -1,0 +1,74 @@
+mir 7
+
+# task.spawn frame operand is a safe_mut of the wrong element type.
+
+const @one: u64 = 1
+
+enum @__alder_step.status {
+  done
+  call
+  park
+  cancelled
+}
+
+enum @__alder_step.state.leaf {
+  entry
+}
+
+type @__alder_step.frame.leaf {
+  state: @__alder_step.state.leaf
+  p0: u64
+  out: u64
+}
+
+enum @__alder_step.state.spawner {
+  entry
+}
+
+type @__alder_step.frame.spawner {
+  state: @__alder_step.state.spawner
+  p0: u64
+  p1: u64
+  x0: safe_mut(@__alder_step.frame.leaf)
+  y0: domain_handle
+  out: u64
+}
+
+fn @__alder_step.run.leaf(%d: domain_handle, %frame: safe_mut(@__alder_step.frame.leaf), %frame_owner: domain_handle) -> @__alder_step.status {
+bb0:
+  %state = load field(deref %frame, state)
+  switch %state {
+    entry -> bb_entry
+  }
+
+bb_entry:
+  %seed = load field(deref %frame, p0)
+  store field(deref %frame, out), %seed
+  %done = enum.construct @__alder_step.status, done
+  return %done
+}
+
+fn @__alder_step.run.spawner(%d: domain_handle, %frame: safe_mut(@__alder_step.frame.spawner), %frame_owner: domain_handle) -> @__alder_step.status {
+bb0:
+  %state = load field(deref %frame, state)
+  switch %state {
+    entry -> bb_entry
+  }
+
+bb_entry:
+  %one = const.get @one
+  %child_domain = domain.create %frame_owner
+  %child = alloc %child_domain, @__alder_step.frame.leaf, %one
+  %seed = load field(deref %frame, p0)
+  store field(deref %child, p0), %seed
+  %entry = enum.construct @__alder_step.state.leaf, entry
+  store field(deref %child, state), %entry
+  store field(deref %frame, x0), %child
+  store field(deref %frame, y0), %child_domain
+  %other = alloc %child_domain, u64, %one
+  %group = load field(deref %frame, p1)
+  %task = task.spawn %group, @__alder_step.run.leaf, %other, %child_domain
+  store field(deref %frame, out), %task
+  %done = enum.construct @__alder_step.status, done
+  return %done
+}
