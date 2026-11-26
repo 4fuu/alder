@@ -381,6 +381,7 @@ AlderWakeup *alder_task_wakeup(void);
 void alder_wakeup_signal(AlderWakeup *wakeup);
 void alder_task_wake_id(uint64_t task);
 void alder_task_yield(void);
+void alder_task_park(void);
 void alder_task_wait_reason(uint32_t reason);
 bool alder_task_cancelled(void);
 void alder_task_shield_push(void);
@@ -445,6 +446,11 @@ Failure contracts:
   and never affects scheduling. The executor clears the field when it
   dequeues the task.
 - `alder_task_cancelled` reports false while the shield depth is positive.
+- `alder_task_park` is a lowering marker, not a runtime entry: the splitter
+  recognizes the resolved binding and emits the canonical park save and
+  `return park`; generated code never calls it, and the runtime provides no
+  definition. A step that reaches the marker without a prior wakeup
+  registration is a contract violation.
 - `alder_timer_at` registers an absolute deadline in the monotonically
   increasing executor clock. A deadline at or before the current clock
   signals immediately. `UINT64_MAX` is the no-deadline sentinel: it returns

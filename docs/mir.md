@@ -1277,6 +1277,14 @@ Every suspension point follows the same sequence:
 
 Mechanism-specific rules:
 
+- **Park marker.** `alder_task_park()` is a compiler-recognized runtime
+  binding that marks a park suspension point. The wrapper registers the
+  wakeup first, then calls the marker; the splitter lowers that call to the
+  canonical park save and `return park`, and no C call to it is ever emitted.
+  The runtime declares it but does not define it. A marker call without a
+  prior wakeup registration, or outside a step function, is a contract
+  violation. The verifier recognizes the marker by its resolved binding
+  target, exactly like the cancellation observation.
 - **Capability operations.** A capability wrapper written against `I: Io`
   lowers its suspending instance to a step function whose leaf calls the
   host shim: start the operation and register the token, then `park`; on

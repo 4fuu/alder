@@ -720,6 +720,12 @@ void alder_task_wait_reason(uint32_t reason);
 /* Cancellation observation: false while the task's shield depth is positive. */
 bool alder_task_cancelled(void);
 
+/* Park suspension marker, recognized by the step splitter through its
+ * resolved binding. The splitter lowers a call to the canonical park save
+ * and return; generated code never calls it and the runtime never defines
+ * it. The wakeup registration must precede the marker call. */
+void alder_task_park(void);
+
 /* Raise or lower the task-wide teardown shield. Popping at depth zero is a
  * contract violation. */
 void alder_task_shield_push(void);
