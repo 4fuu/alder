@@ -1284,7 +1284,11 @@ Mechanism-specific rules:
   The runtime declares it but does not define it. A marker call without a
   prior wakeup registration, or outside a step function, is a contract
   violation. The verifier recognizes the marker by its resolved binding
-  target, exactly like the cancellation observation.
+  target, exactly like the cancellation observation. The checker admits the
+  marker as the second runtime-namespace binding exception (after
+  `alder_task_cancelled`) and records the call as a park suspension fact for
+  the splitter; the registration-precedes-marker order remains a lowering
+  and runtime contract.
 - **Capability operations.** A capability wrapper written against `I: Io`
   lowers its suspending instance to a step function whose leaf calls the
   host shim: start the operation and register the token, then `park`; on
