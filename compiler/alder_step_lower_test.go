@@ -328,3 +328,84 @@ pub fn main() -> I32 {
 	}
 	checkLowerGolden(t, "step-branch.mir", out)
 }
+
+func runAlderStepCleanupLowerConformance(t *testing.T, exe string) {
+	t.Helper()
+	files := map[string]string{
+		"private.marker": "Map(\n",
+		"std/io.al": `module std.io
+
+pub trait Io {
+}
+
+pub trait BlockingIo {
+}
+
+pub trait AsyncIo {
+}
+
+pub type Blocking {
+}
+
+impl Io for Blocking {
+}
+
+impl BlockingIo for Blocking {
+}
+`,
+		"cleanup.al": `module step.cleanup
+
+import std.io { AsyncIo, Blocking, Io }
+
+type Res {
+    id: U64
+}
+
+impl Cleanup for Res {
+    fn cleanup(take self) -> Unit {
+        return
+    }
+}
+
+type TestIo {
+}
+
+impl Io for TestIo {
+}
+
+impl AsyncIo for TestIo {
+}
+
+fn leaf(I: type(Io), io: I, n: U64) -> U64 {
+    return n + 1
+}
+
+fn work(I: type(Io), io: I, n: U64) -> U64 {
+    let r = Res(id: n)
+    using held = r
+    let a = leaf(io, n)
+    let b = leaf(io, a)
+    return b
+}
+
+pub fn main() -> I32 {
+    let block = Blocking()
+    let test = TestIo()
+    let a = work(block, 40)
+    let b = work(test, 40)
+    if a != b { return 1 }
+    if a != 42 { return 2 }
+    return 0
+}
+`,
+	}
+	out := runLowerCompiler(t, exe, files, []string{"std/io.al", "cleanup.al"})
+	module, err := mir.Parse(string(out))
+	if err != nil {
+		t.Fatalf("parse cleanup step MIR: %v\n%s", err, out)
+	}
+	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+		t.Fatalf("verify cleanup step MIR: %s\n%s", verify.Errors(diagnostics), out)
+	}
+	checkLowerGolden(t, "step-cleanup.mir", out)
+}

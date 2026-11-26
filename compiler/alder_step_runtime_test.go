@@ -29,7 +29,7 @@ impl BlockingIo for Blocking {
 }
 `
 
-func runAlderStepProgram(t *testing.T, exe, cc, root, source string) string {
+func runAlderStepProgram(t *testing.T, exe, cc, root, source, driver string) string {
 	t.Helper()
 	files := map[string]string{
 		"std/io.al":  alderStepRuntimeStdIO,
@@ -46,7 +46,9 @@ func runAlderStepProgram(t *testing.T, exe, cc, root, source string) string {
 	if err := os.WriteFile(cPath, []byte(result.stdout), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	driver := "#include <stdint.h>\nextern int32_t alder_program_entry(void *);\nint main(void) { int context = 0; return (int)alder_program_entry(&context); }\n"
+	if driver == "" {
+		driver = "#include <stdint.h>\nextern int32_t alder_program_entry(void *);\nint main(void) { int context = 0; return (int)alder_program_entry(&context); }\n"
+	}
 	if err := os.WriteFile(driverPath, []byte(driver), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -76,6 +78,7 @@ func TestAlderStepRuntimePrograms(t *testing.T) {
 	cases := []struct {
 		name   string
 		source string
+		driver string
 		want   string
 	}{
 		{
@@ -198,6 +201,126 @@ pub fn main() -> I32 {
 			want: "alder_step___alder_step_run_loop",
 		},
 		{
+			name: "cleanup-two-points",
+			source: `import std.io { AsyncIo, Blocking, Io }
+
+type Res {
+    id: U64
+}
+
+impl Cleanup for Res {
+    fn cleanup(take self) -> Unit {
+        return
+    }
+}
+
+type TestIo {
+}
+
+impl Io for TestIo {
+}
+
+impl AsyncIo for TestIo {
+}
+
+fn leaf(I: type(Io), io: I, n: U64) -> U64 {
+    return n + 1
+}
+
+fn work(I: type(Io), io: I, n: U64) -> U64 {
+    let r = Res(id: n)
+    using held = r
+    let a = leaf(io, n)
+    let b = leaf(io, a)
+    return b
+}
+
+pub fn main() -> I32 {
+    let block = Blocking()
+    let test = TestIo()
+    let a = work(block, 40)
+    let b = work(test, 40)
+    if a != b { return 1 }
+    if a != 42 { return 2 }
+    return 0
+}
+`,
+			want: "alder_cleanup_scope_begin_adopting",
+		},
+		{
+			name: "cancelled-cleanup-reverse",
+			source: `import std.io { AsyncIo, Io }
+
+import c cancel_self: fn() -> Unit
+import c mark: fn(U64) -> Unit
+
+type First {
+}
+
+impl Cleanup for First {
+    fn cleanup(take self) -> Unit {
+        unsafe c { mark(1) }
+    }
+}
+
+type Second {
+}
+
+impl Cleanup for Second {
+    fn cleanup(take self) -> Unit {
+        unsafe c { mark(2) }
+    }
+}
+
+type TestIo {
+}
+
+impl Io for TestIo {
+}
+
+impl AsyncIo for TestIo {
+}
+
+fn leaf(I: type(Io), io: I, n: U64) -> U64 {
+    return n + 1
+}
+
+fn work(I: type(Io), io: I, n: U64) -> U64 {
+    let first = First()
+    using held_first = first
+    let second = Second()
+    using held_second = second
+    unsafe c { cancel_self() }
+    let a = leaf(io, n)
+    let b = leaf(io, a)
+    return b
+}
+
+pub fn main() -> I32 {
+    let test = TestIo()
+    let value = work(test, 40)
+    return 0
+}
+`,
+			driver: `#include <stdint.h>
+#include "alder.h"
+extern int32_t alder_program_entry(void *);
+static uint64_t marks = 0;
+static uint64_t count = 0;
+void cancel_self(void) { alder_task_cancel(alder_task_id()); }
+void mark(uint64_t value) { marks = marks * 10 + value; count++; }
+int main(void) {
+    int context = 0;
+    int result = (int)alder_program_entry(&context);
+    if (result != 0) { return 20; }
+    if (marks != 21) { return 21; }
+    if (count != 2) { return 22; }
+    return 0;
+}
+`,
+			want: "alder_step___alder_step_run_work",
+		},
+		{
 			name: "recursive-frame",
 			source: `import std.io { AsyncIo, Io }
 
@@ -227,7 +350,7 @@ pub fn main() -> I32 {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			generated := runAlderStepProgram(t, exe, cc, root, tc.source)
+			generated := runAlderStepProgram(t, exe, cc, root, tc.source, tc.driver)
 			if !strings.Contains(generated, tc.want) {
 				t.Fatalf("generated C has no step thunk %q:\n%s", tc.want, generated)
 			}

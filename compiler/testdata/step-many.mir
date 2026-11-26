@@ -237,14 +237,14 @@ bb_entry:
   branch %__alder_step_v58, bb_cancel_entry, bb_entry_go
 
 bb_entry_go:
-  %__alder_step_v108 = load field(deref %frame, p0)
-  %__alder_step_v109 = load field(deref %frame, p1)
-  %__alder_step_v110 = c.call.unsafe @alder_step_runtime.task_cancelled()
-  branch %__alder_step_v110, bb_cancel_pre_0, bb_suspend_0
+  %__alder_step_v99 = load field(deref %frame, p0)
+  %__alder_step_v100 = load field(deref %frame, p1)
+  %__alder_step_v101 = c.call.unsafe @alder_step_runtime.task_cancelled()
+  branch %__alder_step_v101, bb_cancel_pre_0, bb_suspend_0
 
 bb_old_2:
-  %__alder_step_v111 = load field(deref %frame, p0)
-  %__alder_step_v112 = load field(deref %frame, p1)
+  %__alder_step_v102 = load field(deref %frame, p0)
+  %__alder_step_v103 = load field(deref %frame, p1)
   panic
 
 bb_suspend_0:
@@ -277,22 +277,22 @@ bb_join_0:
   jump bb_after_0
 
 bb_after_0:
-  %__alder_step_v113 = load field(deref %frame, p0)
-  %__alder_step_v114 = load field(deref %frame, p1)
+  %__alder_step_v104 = load field(deref %frame, p0)
+  %__alder_step_v105 = load field(deref %frame, p1)
   store local %a, %__alder_step_v64
   %__alder_step_v55 = load local %a
-  %__alder_step_v115 = c.call.unsafe @alder_step_runtime.task_cancelled()
-  branch %__alder_step_v115, bb_cancel_pre_1, bb_suspend_1
+  %__alder_step_v106 = c.call.unsafe @alder_step_runtime.task_cancelled()
+  branch %__alder_step_v106, bb_cancel_pre_1, bb_suspend_1
 
 bb_cancel_pre_0:
-  %__alder_step_v99 = enum.construct @__alder_step.status, cancelled
-  return %__alder_step_v99
+  %__alder_step_v113 = enum.construct @__alder_step.status, cancelled
+  return %__alder_step_v113
 
 bb_cancel_resume_0:
-  %__alder_step_v100 = load field(deref %frame, y0)
-  domain.destroy %__alder_step_v100
-  %__alder_step_v101 = enum.construct @__alder_step.status, cancelled
-  return %__alder_step_v101
+  %__alder_step_v114 = load field(deref %frame, y0)
+  domain.destroy %__alder_step_v114
+  %__alder_step_v115 = enum.construct @__alder_step.status, cancelled
+  return %__alder_step_v115
 
 bb_suspend_1:
   %__alder_step_v83 = load field(deref %frame, p0)
@@ -324,22 +324,22 @@ bb_join_1:
   jump bb_after_1
 
 bb_after_1:
-  %__alder_step_v116 = load field(deref %frame, p0)
-  %__alder_step_v117 = load field(deref %frame, p1)
+  %__alder_step_v107 = load field(deref %frame, p0)
+  %__alder_step_v108 = load field(deref %frame, p1)
   store local %b, %__alder_step_v69
   %__alder_step_v56 = load local %b
-  %__alder_step_v118 = c.call.unsafe @alder_step_runtime.task_cancelled()
-  branch %__alder_step_v118, bb_cancel_pre_2, bb_suspend_2
+  %__alder_step_v109 = c.call.unsafe @alder_step_runtime.task_cancelled()
+  branch %__alder_step_v109, bb_cancel_pre_2, bb_suspend_2
 
 bb_cancel_pre_1:
-  %__alder_step_v102 = enum.construct @__alder_step.status, cancelled
-  return %__alder_step_v102
+  %__alder_step_v116 = enum.construct @__alder_step.status, cancelled
+  return %__alder_step_v116
 
 bb_cancel_resume_1:
-  %__alder_step_v103 = load field(deref %frame, y1)
-  domain.destroy %__alder_step_v103
-  %__alder_step_v104 = enum.construct @__alder_step.status, cancelled
-  return %__alder_step_v104
+  %__alder_step_v117 = load field(deref %frame, y1)
+  domain.destroy %__alder_step_v117
+  %__alder_step_v118 = enum.construct @__alder_step.status, cancelled
+  return %__alder_step_v118
 
 bb_suspend_2:
   %__alder_step_v91 = load field(deref %frame, p0)
@@ -371,21 +371,21 @@ bb_join_2:
   jump bb_after_2
 
 bb_after_2:
-  %__alder_step_v119 = load field(deref %frame, p0)
-  %__alder_step_v120 = load field(deref %frame, p1)
+  %__alder_step_v110 = load field(deref %frame, p0)
+  %__alder_step_v111 = load field(deref %frame, p1)
   store field(deref %frame, out), %__alder_step_v74
-  %__alder_step_v121 = enum.construct @__alder_step.status, done
-  return %__alder_step_v121
+  %__alder_step_v112 = enum.construct @__alder_step.status, done
+  return %__alder_step_v112
 
 bb_cancel_pre_2:
-  %__alder_step_v105 = enum.construct @__alder_step.status, cancelled
-  return %__alder_step_v105
+  %__alder_step_v119 = enum.construct @__alder_step.status, cancelled
+  return %__alder_step_v119
 
 bb_cancel_resume_2:
-  %__alder_step_v106 = load field(deref %frame, y2)
-  domain.destroy %__alder_step_v106
-  %__alder_step_v107 = enum.construct @__alder_step.status, cancelled
-  return %__alder_step_v107
+  %__alder_step_v120 = load field(deref %frame, y2)
+  domain.destroy %__alder_step_v120
+  %__alder_step_v121 = enum.construct @__alder_step.status, cancelled
+  return %__alder_step_v121
 
 bb_cancel_entry:
   %__alder_step_v59 = enum.construct @__alder_step.status, cancelled
