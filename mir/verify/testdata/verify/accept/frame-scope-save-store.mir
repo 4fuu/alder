@@ -1,7 +1,7 @@
 mir 6
 
 # A frame-resident cleanup scope spans a park. The adopting begin stores its
-# handle into s0, and the suspend block stores the same handle again as part of
+# handle into s0, and the suspend block stores the same handle twice as part of
 # the save list. Both stores name the same s0 dynamic scope, as do the resume
 # and cancellation re-adopting begins; the anchor is the field, not a count of
 # stores of one SSA value.
@@ -59,6 +59,7 @@ bb_setup:
   store field(deref %frame, s0), %scope
   %resume = enum.construct @__alder_step.state.worker.Evented, resume0
   store field(deref %frame, state), %resume
+  store field(deref %frame, s0), %scope
   store field(deref %frame, s0), %scope
   %id = cleanup.push %scope, @hook, (%p0) place field(deref %frame, l0)
   store field(deref %frame, c0), %id

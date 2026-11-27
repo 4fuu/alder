@@ -1455,6 +1455,7 @@ fn run_cases(d: Domain, initial: MirStore) -> Result(Bool, __s0_Error) {
     if !emit_verification(214, try mir_verify_module(d, try frame_cursor_fixture(d, try mir_store_new(d), 0), 6)) { return Ok(false) }
     if !emit_verification(215, try mir_verify_module(d, try frame_cursor_fixture(d, try mir_store_new(d), 1), 6)) { return Ok(false) }
     if !emit_verification(216, try mir_verify_module(d, try frame_cursor_fixture(d, try mir_store_new(d), 2), 6)) { return Ok(false) }
+    if !emit_verification(217, try mir_verify_module(d, try frame_cursor_fixture(d, try mir_store_new(d), 3), 6)) { return Ok(false) }
     return Ok(true)
 }
 
@@ -1890,6 +1891,10 @@ fn frame_cursor_fixture(d: Domain, initial: MirStore, mode: U64) -> Result(MirSt
     setup_ord = setup_ord + 1
     store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_setup.id, ordinal: setup_ord, op: mir_op_store(), result: 0, place: s0_place.id, type_op: 0, a: scope.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
     setup_ord = setup_ord + 1
+    if mode == 3 {
+        store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_setup.id, ordinal: setup_ord, op: mir_op_store(), result: 0, place: s0_place.id, type_op: 0, a: scope.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+        setup_ord = setup_ord + 1
+    }
     let cleanup_id = try mir_add_value(d, store, step.id, "cleanup_id", cleanup_id_type.type_id, mir_value_def_instruction(), bb_setup.id, setup_ord + 1)
     store = cleanup_id.store
     let push = try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_setup.id, ordinal: setup_ord, op: mir_op_cleanup_push(), result: cleanup_id.id, place: p0_place.id, type_op: 0, a: scope.id, b: 0, c: 0, target: hook.id, name_start: 0, name_end: 0))
@@ -2002,7 +2007,7 @@ func runMIRVerifierConformance(t *testing.T, exe string) {
 	want += "V 89 2\nD 8 64 1 1 4 0 0 0 0 0 0 5\nD 8 64 1 1 5 0 0 0 0 0 0 5\nC 90 0 1 1 2\n"
 	want += "E 91 1 5\nC 92 1 0 0 0\nD 1 5 1 0 0 0 0 0 2 0 0 1\nC 97 1 0 0 0\nD 10 74 1 1 1 0 0 13 0 0 10 13\nC 98 1 0 0 0\nD 10 74 1 1 1 0 0 18 0 0 10 18\nC 93 0 1 0 0\nC 100 0 1 0 0\nC 101 1 0 0 0\nD 5 41 2 1 1 0 0 15 0 0 15 2\nC 102 1 0 0 0\nD 5 41 2 1 2 0 0 10 0 0 10 3\nC 103 1 0 0 0\nD 5 41 2 1 5 0 0 2 0 0 2 6\nC 104 1 0 0 0\nD 5 41 2 1 5 0 0 2 0 0 2 6\nC 105 0 1 0 0\nC 106 1 0 0 0\nD 5 41 2 1 1 0 0 14 0 0 14 2\nC 107 1 0 0 0\nD 1 11 2 1 1 0 0 0 1 2147483647 0 0\nC 108 1 0 0 0\nD 1 11 2 1 2 0 0 0 2 2147483647 0 0\nV 109 2\nD 6 52 2 1 0 2 0 0 0 0 0 8\nD 6 53 2 1 0 2 0 0 0 0 0 8\nC 110 0 1 0 0\nC 111 0 1 0 0\nC 113 2 0 0 0\nD 6 52 2 1 0 2 0 0 0 0 0 8\nD 6 53 2 1 0 2 0 0 0 0 0 8\n"
 	want += "V 112 1\nD 8 66 1 1 3 0 0 0 0 0 0 5\n"
-	want += "V 200 0\nV 201 5\nD 2 21 2 0 0 0 0 0 2 0 0 2\nD 2 76 2 0 0 0 0 0 2 0 0 0\nD 2 80 0 0 0 0 0 16 16 0 0 0\nD 2 77 0 0 0 0 0 14 14 0 0 0\nD 2 89 2 0 0 0 0 17 2 0 0 0\nV 202 1\nD 2 77 0 0 0 0 0 14 14 0 0 0\nV 203 1\nD 2 78 0 0 0 0 0 15 15 0 0 0\nV 204 1\nD 2 79 0 0 0 0 0 16 16 0 0 0\nV 205 1\nD 2 80 0 0 0 0 0 19 19 0 0 0\nV 206 1\nD 2 89 2 0 0 0 0 17 1 0 0 0\nV 207 1\nD 6 94 2 3 0 4 0 0 2 0 0 1\nV 208 1\nD 6 96 2 5 0 6 0 0 2 0 0 0\nV 209 1\nD 6 97 2 6 0 7 0 0 2 0 0 0\nV 210 1\nD 6 90 2 1 0 0 0 0 2 0 0 0\nV 211 2\nD 5 44 2 5 10 0 0 1 0 0 1 1\nD 5 86 2 5 10 0 0 0 0 0 0 0\nV 212 1\nD 5 87 2 5 10 0 3 0 8 0 0 0\nV 213 1\nD 6 91 2 8 14 0 0 0 2 0 0 2\nV 214 0\nV 215 0\nV 216 1\nD 7 102 3 4 0 0 0 0 3 0 0 2\n"
+	want += "V 200 0\nV 201 5\nD 2 21 2 0 0 0 0 0 2 0 0 2\nD 2 76 2 0 0 0 0 0 2 0 0 0\nD 2 80 0 0 0 0 0 16 16 0 0 0\nD 2 77 0 0 0 0 0 14 14 0 0 0\nD 2 89 2 0 0 0 0 17 2 0 0 0\nV 202 1\nD 2 77 0 0 0 0 0 14 14 0 0 0\nV 203 1\nD 2 78 0 0 0 0 0 15 15 0 0 0\nV 204 1\nD 2 79 0 0 0 0 0 16 16 0 0 0\nV 205 1\nD 2 80 0 0 0 0 0 19 19 0 0 0\nV 206 1\nD 2 89 2 0 0 0 0 17 1 0 0 0\nV 207 1\nD 6 94 2 3 0 4 0 0 2 0 0 1\nV 208 1\nD 6 96 2 5 0 6 0 0 2 0 0 0\nV 209 1\nD 6 97 2 6 0 7 0 0 2 0 0 0\nV 210 1\nD 6 90 2 1 0 0 0 0 2 0 0 0\nV 211 2\nD 5 44 2 5 10 0 0 1 0 0 1 1\nD 5 86 2 5 10 0 0 0 0 0 0 0\nV 212 1\nD 5 87 2 5 10 0 3 0 8 0 0 0\nV 213 1\nD 6 91 2 8 14 0 0 0 2 0 0 2\nV 214 0\nV 215 0\nV 216 1\nD 7 102 3 4 0 0 0 0 3 0 0 2\nV 217 0\n"
 
 	var baseline string
 	for i := 0; i < 3; i++ {

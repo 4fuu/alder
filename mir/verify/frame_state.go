@@ -295,7 +295,9 @@ func frameSaveList(m *mir.Module, inv *frameInventory, f *mir.Function, step *fr
 			return fields, fmt.Sprintf("a suspend block may not save frame field %q", field)
 		}
 		if seen[field] {
-			return fields, fmt.Sprintf("a suspend block saves frame field %q more than once", field)
+			// A field stored more than once in one suspend block counts once
+			// in that block's save set.
+			continue
 		}
 		if !isScopeField(step, fi) {
 			if fi <= lastIndex && orderErr == "" {

@@ -3177,7 +3177,13 @@ fn mir_vframe_phase6(d: Domain, store: MirStore, indexes: MirVIndexes, out0: __s
                                     if !savable { bad = true } else { let part_rec = __s0_buffer_get(MirTypePartRec, store.type_parts, part - 1)
                                         if kind != mir_vframe_field_scope() { if part_rec.ordinal <= last_ordinal { bad = true }
                                             last_ordinal = part_rec.ordinal }
-                                        save_pos = try __s0_buffer_append(U64, d, save_pos, pos) } } }
+                                        var duplicate = false
+                                        var dup_at = run.save_start
+                                        while dup_at < __s0_buffer_len(U64, save_pos) {
+                                            if __s0_buffer_get(U64, save_pos, dup_at) == pos { duplicate = true }
+                                            dup_at = dup_at + 1
+                                        }
+                                        if !duplicate { save_pos = try __s0_buffer_append(U64, d, save_pos, pos) } } } }
                             ord = ord + 1 }
                         mir_vframe_sort_save_pos(scan, store, frame_index, save_pos, run.save_start, __s0_buffer_len(U64, save_pos) - run.save_start)
                         if bad { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), mir_vdiag_frame_save_order(), function, block, state_iid, 0, 0, 0, function, 0, 0, state_variant)) }
