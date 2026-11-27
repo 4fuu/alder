@@ -1016,10 +1016,14 @@ this exact order. Omitted groups produce no field:
    declaration order. The hidden leading domain parameter is not a source
    parameter. A borrowed parameter is followed immediately by
    `o<i>: domain_handle`, its owner domain.
-3. `x<i>`: for each suspension point `i` whose action is a call handoff, a
-   `safe_mut(@__alder_step.frame.<callee>)` reference to the callee frame.
+3. `x<i>`: one per call-handoff suspension point, in source order over the
+   call-handoff points only (dense over call points, independent of the state
+   numbering), a `safe_mut(@__alder_step.frame.<callee>)` reference to the
+   callee frame.
 4. `y<i>`: for the same points, the callee activation's `domain_handle`.
-   `x<i>` and `y<i>` are adjacent and in suspension-point source order.
+   `x<i>` and `y<i>` are adjacent and in call-handoff source order. A park
+   point saves no pair; the binding between a state and its pair is the pair
+   its suspend block saves, never the resume suffix.
 5. `d<i>`: one `domain_handle` for each `domain.create` site whose handle is
    live across a suspension point, in create-site order.
 6. `l<i>`: one field per MIR local live across a suspension point, in MIR
@@ -1252,14 +1256,17 @@ meaning of any existing MIR 6 module:
   hook observes the value the frame holds at scope exit. `cleanup.scope.run`
   must still precede `cleanup.scope.end` on every exit path, and reverse order
   and at-most-once are checked against the recorded list;
-- the step function's `return` always returns a status variant. `call`
-  requires the current state to be a call-type `resume<i>` or `cleanup<j>`
-  with matching `x<i>` and `y<i>`; `park` requires a park-type `resume<i>` or
-  `cleanup<j>`; `done` requires `out` to be initialized on every path that
-  reaches it; `cancelled` requires no `out` and is reachable only from a
-  cancellation teardown path. A `cleanup<j>` state is the suspension point of
-  a suspending cleanup entry and follows the same dispatch, save/load
-  equality, and cancellation-check rules as a `resume<i>` state;
+- the step function's `return` always returns a status variant. A state is
+  call-type exactly when its suspend block saves an `x<i>`/`y<i>` pair, and
+  park-type otherwise; the classification reads the saved pair, including for
+  `cleanup<j>` states, and never infers the kind from the resume suffix.
+  `call` requires the current state to be a call-type `resume<i>` or
+  `cleanup<j>` with matching `x<i>` and `y<i>`; `park` requires a park-type
+  `resume<i>` or `cleanup<j>`; `done` requires `out` to be initialized on every
+  path that reaches it; `cancelled` requires no `out` and is reachable only
+  from a cancellation teardown path. A `cleanup<j>` state is the suspension
+  point of a suspending cleanup entry and follows the same dispatch,
+  save/load equality, and cancellation-check rules as a `resume<i>` state;
 - the cancellation check at a resume or cleanup-resume block entry is a
   binding call resolved to the runtime's `alder_task_cancelled` entry. The
   verifier recognizes cancellation observation by that resolved binding
