@@ -1191,7 +1191,14 @@ meaning of any existing MIR 6 module:
   table views remain excluded: they cannot complete a table access region
   across a suspension;
 - `alloc %d, @__alder_step.frame.<instance>, %n` is accepted with `%n == 1`
-  even though the element type recursively contains view and handle kinds;
+  even though the element type recursively contains view and handle kinds.
+  Two allocation patterns are legal inside a step function: a call handoff
+  allocates the callee frame in a child domain of the allocating step's
+  activation domain and stores the reference once into the allocating step's
+  own `x<i>`; a spawn site allocates the spawned root frame in a child domain
+  of the allocating step's activation domain and consumes the reference as
+  the frame operand of `task.spawn`, with no `x<i>` store. An alloc outside
+  both patterns, or outside a step function, is rejected;
 - `load` and `store` through a frame field place are accepted for every field
   type. A handle-typed load keeps the direct identity anchored to the
   (activation, field) pair; it is not a new dynamic identity on every entry.
@@ -1215,9 +1222,13 @@ meaning of any existing MIR 6 module:
   Every emission stores its result into the scope's `s<i>` field before use,
   and the verifier anchors all emissions storing the same `s<i>` to one
   dynamic scope, so the handle dominates the segment's uses and the lexical
-  `cleanup.scope.run`/`end` still execute at the source scope's exit. `s<i>`
-  participates in the state-indexed save/load equality like every other
-  saved field;
+  `cleanup.scope.run`/`end` still execute at the source scope's exit. The
+  anchor is the field, not an SSA store count: the canonical save-list store
+  of `s<i>` at a suspend block and the adopting-begin stores at every resume
+  or `cleanup<j>` teardown state lexically inside the scope all belong to that
+  one dynamic scope. `cleanup<j>` states re-adopt the scopes they are inside
+  exactly like resume states, in outer-to-inner order. `s<i>` participates in
+  the state-indexed save/load equality like every other saved field;
 - the frame is the activation's stable storage across states. A frame field
   of a capability or handle kind may be carried across a state as a local
   place, subject to the state-indexed store/load equality above and to the
