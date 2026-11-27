@@ -134,6 +134,9 @@ impl Io for TestCapability {
     fn random_bytes(self, buffer: MutSlice(U8)) -> Unit {
         panic("test capability")
     }
+    fn check_cancel(self) -> Unit {
+        panic("test capability")
+    }
 }
 
 impl AsyncIo for TestCapability {

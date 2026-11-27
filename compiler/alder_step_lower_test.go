@@ -31,6 +31,9 @@ pub type Blocking {
 }
 
 impl Io for Blocking {
+    fn check_cancel(self) -> Unit {
+        return
+    }
 }
 
 impl BlockingIo for Blocking {
@@ -44,6 +47,9 @@ type TestIo {
 }
 
 impl Io for TestIo {
+    fn check_cancel(self) -> Unit {
+        return
+    }
 }
 
 impl AsyncIo for TestIo {
@@ -119,6 +125,9 @@ pub type Blocking {
 }
 
 impl Io for Blocking {
+    fn check_cancel(self) -> Unit {
+        return
+    }
 }
 
 impl BlockingIo for Blocking {
@@ -132,6 +141,9 @@ type TestIo {
 }
 
 impl Io for TestIo {
+    fn check_cancel(self) -> Unit {
+        return
+    }
 }
 
 impl AsyncIo for TestIo {
@@ -194,6 +206,9 @@ pub type Blocking {
 }
 
 impl Io for Blocking {
+    fn check_cancel(self) -> Unit {
+        return
+    }
 }
 
 impl BlockingIo for Blocking {
@@ -207,6 +222,9 @@ type TestIo {
 }
 
 impl Io for TestIo {
+    fn check_cancel(self) -> Unit {
+        return
+    }
 }
 
 impl AsyncIo for TestIo {
@@ -272,6 +290,9 @@ pub type Blocking {
 }
 
 impl Io for Blocking {
+    fn check_cancel(self) -> Unit {
+        return
+    }
 }
 
 impl BlockingIo for Blocking {
@@ -283,6 +304,9 @@ type TestIo {
 }
 
 impl Io for TestIo {
+    fn check_cancel(self) -> Unit {
+        return
+    }
 }
 
 impl AsyncIo for TestIo {
@@ -348,6 +372,9 @@ pub type Blocking {
 }
 
 impl Io for Blocking {
+    fn check_cancel(self) -> Unit {
+        return
+    }
 }
 
 impl BlockingIo for Blocking {
@@ -371,6 +398,9 @@ type TestIo {
 }
 
 impl Io for TestIo {
+    fn check_cancel(self) -> Unit {
+        return
+    }
 }
 
 impl AsyncIo for TestIo {
@@ -429,6 +459,9 @@ pub type Blocking {
 }
 
 impl Io for Blocking {
+    fn check_cancel(self) -> Unit {
+        return
+    }
 }
 
 impl BlockingIo for Blocking {
@@ -454,6 +487,9 @@ type TestIo {
 }
 
 impl Io for TestIo {
+    fn check_cancel(self) -> Unit {
+        return
+    }
 }
 
 impl AsyncIo for TestIo {

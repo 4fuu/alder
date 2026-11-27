@@ -663,6 +663,34 @@ bool alder_executor_configure(const AlderExecutorConfig *config);
 bool alder_executor_run(const AlderExecutorHooks *hooks);
 
 /*
+ * Install the hook record used by a later alder_executor_run(NULL). The
+ * runtime copies the record, so the caller may pass a stack value. A NULL
+ * record removes the default. This is how a test capability supplies SimIo's
+ * idle diagnostic to an entry that calls alder_executor_run with no hooks.
+ */
+void alder_executor_set_default_hooks(const AlderExecutorHooks *hooks);
+
+/*
+ * Create a task group: a runtime record that owns the child list, group
+ * cancellation, and join policy. The returned id is stable until
+ * alder_group_release.
+ */
+uint64_t alder_group_create(void);
+
+/* Set the cancel flag on every live child of the group. */
+void alder_group_cancel(uint64_t group);
+
+/*
+ * The id of one live child of the group, newest first, or zero when every
+ * child has been released. A group cleanup hook cancels each returned child,
+ * awaits it, and releases it through alder_task_release_spawned.
+ */
+uint64_t alder_group_next(uint64_t group);
+
+/* Free a group record after every child has been released. */
+void alder_group_release(uint64_t group);
+
+/*
  * Create a task in the created state with one root activation. The caller
  * owns the root frame and its domain, keeps them valid until release, and
  * copies any result before destroying the domain. group is an opaque
@@ -790,6 +818,58 @@ uint64_t alder_task_id(void);
  * observes the current step's task, not a freshly created child.
  */
 uint64_t alder_task_handle(AlderTask *task);
+
+/*
+ * One-based creation index, assigned in alder_task_create order. SimIo's
+ * blocked-task diagnostic lists this index instead of the generational id.
+ */
+uint64_t alder_task_spawn_index(uint64_t task);
+
+/*
+ * Mark a spawned task as owning its root activation domain. The spawn helper
+ * allocates that domain, and the runtime destroys it when the task is
+ * released through alder_task_release_spawned. Plain alder_task_create tasks
+ * keep the caller-owned domain contract.
+ */
+void alder_task_own_domain(uint64_t task);
+
+/*
+ * Release a completed spawned task and destroy its root activation domain.
+ * The caller must have copied every result value it needs.
+ */
+void alder_task_release_spawned(uint64_t task);
+
+/*
+ * The completed child of the current task's most recent await, as a
+ * one-element view of the child root frame's out field. The caller copies the
+ * value into its own domain before releasing the child.
+ */
+AlderSlice alder_task_await_result_slice(uint64_t offset);
+
+/* True when the task of the current task's most recent await was canceled and
+ * therefore has no result value. */
+bool alder_task_awaited_cancelled(void);
+
+/* Release the most recently awaited child, destroying its root activation
+ * domain. */
+void alder_task_release_awaited(void);
+
+/*
+ * Executor clock in nanoseconds. It starts at zero, advances only to timer
+ * deadlines or through the executor's now hook, and never moves backwards.
+ */
+uint64_t alder_executor_clock(void);
+
+/*
+ * Register an absolute deadline relative to the current executor clock on
+ * the current task's wakeup. A zero delay signals immediately; the caller
+ * follows the registration with a park marker. UINT64_MAX is the no-deadline
+ * sentinel, and an overflowing delay saturates below it.
+ */
+bool alder_timer_in(uint64_t delay);
+
+/* Remove every timer registration of the current task. */
+void alder_timer_clear(void);
 
 /* ------------------------------------------------------------------ */
 /* Scoped cleanup                                                      */
@@ -1011,12 +1091,6 @@ int alder_cstring_make(const uint8_t *data, uint64_t len, char **out);
 char *alder_cstring_make_lit(const uint8_t *data, uint64_t len);
 void alder_cstring_release(char *buffer);
 
-#ifdef __cplusplus
-}
-#endif
-
-#endif /* ALDER_RUNTIME_H */
-
 /* ------------------------------------------------------------------ */
 /* Structural hashing                                                  */
 /* ------------------------------------------------------------------ */
@@ -1039,3 +1113,9 @@ void alder_hash_write_uint(AlderHashState *state, uint64_t value, uint64_t width
 void alder_hash_write_u64(AlderHashState *state, uint64_t value);
 void alder_hash_write_bytes(AlderHashState *state, const uint8_t *data, uint64_t len);
 uint64_t alder_hash_finish(const AlderHashState *state);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* ALDER_RUNTIME_H */

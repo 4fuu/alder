@@ -754,6 +754,11 @@ struct AlderTask {
     AlderTask *awaiter;
     bool awaited;
     AlderTask *awaiting;
+    AlderTask *completed_await;
+    AlderDomain *root_domain;
+    void *root_frame;
+    uint64_t spawn_index;
+    bool owns_domain;
     AlderStepFn pending_step;
     void *pending_frame;
     AlderDomain *pending_domain;
@@ -780,7 +785,11 @@ static size_t g_task_slot_capacity;
 static uint32_t g_task_free_head = UINT32_MAX;
 static size_t g_live_tasks;
 static uint32_t g_next_task_generation = 1;
+static uint64_t g_next_group_id = 1;
+static uint64_t g_next_spawn_index = 1;
 static AlderGroup *g_groups;
+static AlderExecutorHooks g_default_hooks;
+static bool g_default_hooks_set;
 
 /* Threaded executor state. */
 static pthread_mutex_t g_queue_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -1251,6 +1260,72 @@ static void group_unlink(AlderTask *task) {
     group_remove_if_empty(group);
 }
 
+uint64_t alder_group_create(void) {
+    pthread_mutex_lock(&g_registry_lock);
+    uint64_t id = g_next_group_id;
+    if (id == UINT64_MAX) {
+        pthread_mutex_unlock(&g_registry_lock);
+        alder_runtime_panic("task group identity exhausted");
+    }
+    g_next_group_id += 1;
+    (void)group_get(id);
+    pthread_mutex_unlock(&g_registry_lock);
+    return id;
+}
+
+void alder_group_cancel(uint64_t group) {
+    pthread_mutex_lock(&g_registry_lock);
+    AlderGroup *record = group_get(group);
+    size_t count = 0;
+    for (AlderTask *task = record->head; task != NULL; task = task->group_next) {
+        count += 1;
+    }
+    uint64_t *ids = count == 0
+                        ? NULL
+                        : (uint64_t *)rt_malloc(count * sizeof *ids);
+    if (count != 0 && ids == NULL) {
+        pthread_mutex_unlock(&g_registry_lock);
+        alder_runtime_panic("task group cancel allocation failure");
+    }
+    size_t at = 0;
+    for (AlderTask *task = record->head; task != NULL; task = task->group_next) {
+        ids[at++] = task->id;
+    }
+    pthread_mutex_unlock(&g_registry_lock);
+    for (size_t i = 0; i < count; i++) {
+        alder_task_cancel(ids[i]);
+    }
+    rt_free(ids);
+}
+
+uint64_t alder_group_next(uint64_t group) {
+    pthread_mutex_lock(&g_registry_lock);
+    AlderGroup *record = group_get(group);
+    uint64_t id = record->head == NULL ? 0 : record->head->id;
+    pthread_mutex_unlock(&g_registry_lock);
+    return id;
+}
+
+void alder_group_release(uint64_t group) {
+    pthread_mutex_lock(&g_registry_lock);
+    AlderGroup **link = &g_groups;
+    while (*link != NULL) {
+        AlderGroup *record = *link;
+        if (record->id == group) {
+            if (record->head != NULL) {
+                pthread_mutex_unlock(&g_registry_lock);
+                alder_runtime_panic("task group released with live children");
+            }
+            *link = record->next;
+            rt_free(record);
+            pthread_mutex_unlock(&g_registry_lock);
+            return;
+        }
+        link = &record->next;
+    }
+    pthread_mutex_unlock(&g_registry_lock);
+}
+
 static bool timer_less(const AlderTimer *left, const AlderTimer *right) {
     if (left->deadline != right->deadline) {
         return left->deadline < right->deadline;
@@ -1599,6 +1674,7 @@ static void task_complete(AlderTask *task) {
         waiter = task->awaiter;
         task->awaiter = NULL;
         waiter->awaiting = NULL;
+        waiter->completed_await = task;
     }
     /* Publishing DONE last under the registry lock lets a spawner release the
      * record as soon as it observes completion: no completing worker touches
@@ -1743,8 +1819,12 @@ static int blocked_compare(const void *left, const void *right) {
     return 0;
 }
 
+static const AlderExecutorHooks *executor_effective_hooks(
+    const AlderExecutorHooks *hooks);
+
 static void executor_report_idle(const AlderExecutorHooks *hooks,
                                  size_t count) {
+    hooks = executor_effective_hooks(hooks);
     if (hooks == NULL || hooks->on_idle == NULL || count == 0) {
         return;
     }
@@ -1786,7 +1866,16 @@ static void executor_report_idle(const AlderExecutorHooks *hooks,
     rt_free(blocked);
 }
 
+static const AlderExecutorHooks *executor_effective_hooks(
+    const AlderExecutorHooks *hooks) {
+    if (hooks != NULL) {
+        return hooks;
+    }
+    return g_default_hooks_set ? &g_default_hooks : NULL;
+}
+
 static void executor_seed_clock(const AlderExecutorHooks *hooks) {
+    hooks = executor_effective_hooks(hooks);
     if (hooks != NULL && hooks->now != NULL) {
         clock_raise(hooks->now(hooks->context));
     }
@@ -2284,9 +2373,16 @@ AlderTask *alder_task_create_on_lane(uint64_t group, AlderTaskLane lane,
     task->wakeup.task = task;
     task->wait_reason = ALDER_WAIT_NONE;
     task->slot_index = UINT32_MAX;
+    task->root_domain = domain;
+    task->root_frame = frame;
     task->lane = lane == ALDER_LANE_LOCAL ? &g_local_lane : &g_pool_lane;
     pthread_mutex_lock(&g_registry_lock);
     task_registry_insert(task);
+    task->spawn_index = g_next_spawn_index;
+    if (g_next_spawn_index == UINT64_MAX) {
+        alder_runtime_panic("task spawn index exhausted");
+    }
+    g_next_spawn_index += 1;
     AlderGroup *task_group = group_get(group);
     group_link(task_group, task);
     pthread_mutex_unlock(&g_registry_lock);
@@ -2484,6 +2580,7 @@ bool alder_task_await(uint64_t child) {
     target->awaited = true;
     if (atomic_load_explicit(&target->state, memory_order_seq_cst) ==
         ALDER_TASK_DONE) {
+        parent->completed_await = target;
         pthread_mutex_unlock(&g_registry_lock);
         task_unref(target);
         return true;
@@ -2555,6 +2652,109 @@ uint64_t alder_task_handle(AlderTask *task) {
         alder_runtime_panic("task.handle of a null task");
     }
     return task->id;
+}
+
+uint64_t alder_task_spawn_index(uint64_t task) {
+    AlderTask *target =
+        task_resolve(task, "task.spawn_index of a released or foreign id");
+    return target->spawn_index;
+}
+
+void alder_task_own_domain(uint64_t task) {
+    AlderTask *target =
+        task_resolve(task, "task.own_domain of a released or foreign id");
+    target->owns_domain = true;
+}
+
+void alder_task_release_spawned(uint64_t task) {
+    AlderTask *target =
+        task_resolve(task, "task.release_spawned of a released or foreign id");
+    AlderDomain *domain = target->root_domain;
+    bool owns = target->owns_domain;
+    if (g_current_task != NULL && g_current_task->completed_await == target) {
+        g_current_task->completed_await = NULL;
+    }
+    if (owns) {
+        target->owns_domain = false;
+        target->root_domain = NULL;
+        alder_task_release(task);
+        if (domain != NULL) {
+            alder_domain_destroy(domain);
+        }
+        return;
+    }
+    alder_task_release(task);
+}
+
+AlderSlice alder_task_await_result_slice(uint64_t offset) {
+    AlderTask *current =
+        current_task_checked("task.await_result outside a step");
+    AlderTask *child = current->completed_await;
+    if (child == NULL) {
+        alder_runtime_panic("task.await_result without a completed await");
+    }
+    if (child->root_frame == NULL) {
+        alder_runtime_panic("task.await_result without a root frame");
+    }
+    AlderSlice result;
+    result.data = (uint8_t *)child->root_frame + offset;
+    result.len = UINT64_C(1);
+    return result;
+}
+
+bool alder_task_awaited_cancelled(void) {
+    AlderTask *current =
+        current_task_checked("task.awaited_cancelled outside a step");
+    AlderTask *child = current->completed_await;
+    if (child == NULL) {
+        alder_runtime_panic("task.awaited_cancelled without a completed await");
+    }
+    return atomic_load_explicit(&child->cancel_requested,
+                                memory_order_seq_cst);
+}
+
+void alder_task_release_awaited(void) {
+    AlderTask *current =
+        current_task_checked("task.release_awaited outside a step");
+    AlderTask *child = current->completed_await;
+    if (child == NULL) {
+        alder_runtime_panic("task.release_awaited without a completed await");
+    }
+    current->completed_await = NULL;
+    alder_task_release_spawned(child->id);
+}
+
+uint64_t alder_executor_clock(void) {
+    return clock_load();
+}
+
+bool alder_timer_in(uint64_t delay) {
+    AlderTask *current =
+        current_task_checked("timer.in outside a step");
+    uint64_t now = clock_load();
+    uint64_t deadline;
+    if (delay > UINT64_MAX - 1 - now) {
+        deadline = UINT64_MAX - 1;
+    } else {
+        deadline = now + delay;
+    }
+    return alder_timer_at(&current->wakeup, deadline);
+}
+
+void alder_timer_clear(void) {
+    AlderTask *current =
+        current_task_checked("timer.clear outside a step");
+    timer_service_cancel(current);
+}
+
+void alder_executor_set_default_hooks(const AlderExecutorHooks *hooks) {
+    if (hooks == NULL) {
+        memset(&g_default_hooks, 0, sizeof g_default_hooks);
+        g_default_hooks_set = false;
+        return;
+    }
+    g_default_hooks = *hooks;
+    g_default_hooks_set = true;
 }
 
 /* ------------------------------------------------------------------ */

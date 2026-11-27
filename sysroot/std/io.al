@@ -373,6 +373,13 @@ pub trait Io {
     fn wallclock(self) -> Timestamp
     /// Fills `buffer` with unpredictable bytes; a host failure terminates.
     fn random_bytes(self, buffer: MutSlice(U8)) -> Unit
+    /// Structured-cancellation checkpoint for long CPU-bound work. Returns
+    /// normally when no cancellation is pending for the calling task. When
+    /// the calling task's group has begun cancellation, the call ends the
+    /// task's ordinary exit path instead of returning. Always returns
+    /// normally for a caller that is not a group child, so `Blocking`
+    /// implements it as an immediate return.
+    fn check_cancel(self) -> Unit
 }
 
 /// Marks a capability whose operations never suspend.
@@ -752,6 +759,10 @@ impl Io for Blocking {
         if rc.to_i32() != 0 {
             panic("io.random_bytes failed")
         }
+        return
+    }
+
+    fn check_cancel(self) -> Unit {
         return
     }
 }
