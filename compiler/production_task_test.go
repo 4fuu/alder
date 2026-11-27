@@ -680,3 +680,45 @@ func TestTaskDeepUnderCapTypeProduction(t *testing.T) {
 		t.Fatalf("deep under-cap type: %+v", result)
 	}
 }
+
+// TestSimIoCompileOnly builds the SimIo capability through the production
+// compiler. Runtime evidence waits for the specialist lowering merge; this
+// pins that the sysroot module, its C shim, and the Io surface type-check and
+// generate C11.
+func TestSimIoCompileOnly(t *testing.T) {
+	t.Parallel()
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, cc, root)
+	env := sysrootEnv(filepath.Join(root, "sysroot"))
+	body := `module hello.main
+
+import std.io { Io }
+import std.test { SimIo }
+
+pub fn main() -> I32 {
+    let sim = SimIo.seeded(7)
+    let now = sim.monotonic()
+    var bytes: Array(U8, 8) = [0, 0, 0, 0, 0, 0, 0, 0]
+    sim.random_bytes(bytes.slice_mut(0, 8))
+    return (now.nanos + bytes[0].to_u32()).to_i32_wrapping()
+}
+`
+	files := map[string]string{
+		"alder.toml":  taskManifest,
+		"src/main.al": body,
+	}
+	check := runProductionCompilerEnv(t, exe, t.TempDir(), env, files, "check")
+	if check.status != 0 || check.stdout != "" || check.stderr != "" {
+		t.Fatalf("SimIo check: %+v", check)
+	}
+	// The build stage waits for the specialist park-marker lowering: the
+	// direct SimIo bodies still name the alder_task_park marker, which the
+	// runtime deliberately does not define.
+}

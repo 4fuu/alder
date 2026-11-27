@@ -19,6 +19,7 @@ func runAlderStepSplitLowerConformance(t *testing.T, exe string) {
 		"std/io.al": `module std.io
 
 pub trait Io {
+    fn check_cancel(self) -> Unit
 }
 
 pub trait BlockingIo {
@@ -113,6 +114,7 @@ func runAlderRecursiveStepLowerConformance(t *testing.T, exe string) {
 		"std/io.al": `module std.io
 
 pub trait Io {
+    fn check_cancel(self) -> Unit
 }
 
 pub trait BlockingIo {
@@ -194,6 +196,7 @@ func runAlderStepManyLowerConformance(t *testing.T, exe string) {
 		"std/io.al": `module std.io
 
 pub trait Io {
+    fn check_cancel(self) -> Unit
 }
 
 pub trait BlockingIo {
@@ -278,6 +281,7 @@ func runAlderStepBranchLowerConformance(t *testing.T, exe string) {
 		"std/io.al": `module std.io
 
 pub trait Io {
+    fn check_cancel(self) -> Unit
 }
 
 pub trait BlockingIo {
@@ -360,6 +364,7 @@ func runAlderStepCleanupLowerConformance(t *testing.T, exe string) {
 		"std/io.al": `module std.io
 
 pub trait Io {
+    fn check_cancel(self) -> Unit
 }
 
 pub trait BlockingIo {
@@ -447,6 +452,7 @@ func runAlderStepCleanupCursorLowerConformance(t *testing.T, exe string) {
 		"std/io.al": `module std.io
 
 pub trait Io {
+    fn check_cancel(self) -> Unit
 }
 
 pub trait BlockingIo {

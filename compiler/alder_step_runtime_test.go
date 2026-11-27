@@ -11,6 +11,7 @@ import (
 const alderStepRuntimeStdIO = `module std.io
 
 pub trait Io {
+    fn check_cancel(self) -> Unit
 }
 
 pub trait BlockingIo {
