@@ -2345,15 +2345,15 @@ earlier gate. The representation family is fixed by
 - **9.3 Per-instance state-machine lowering** — the split in the Alder-written
   lowering, unchanged direct lowering for `BlockingIo` instances, frame
   save/restore, recursion under one concrete capability, deterministic
-  inspectable MIR, and dual-instance identical-result fixtures. Status: in
-  progress. The N-point splitter, the generated step thunks and publication
-  table, frame hidden slots, adopting begins, the root-as-task entry, and the
-  dual-instance run fixtures (chain, branch/join, loop, 1000-deep recursion)
-  landed at `106b300`; the recursive frame self-reference rule is pinned in
-  [MIR](docs/mir.md#recursion). Remaining: the `cleanup<j>` teardown-state
-  lowering with suspending cleanup cursor expansion and reverse shielded
-  teardown, and source-level park points, which close with the gate 9.7
-  capability surface once the park-trigger binding is pinned. The stage-0
+  inspectable MIR, and dual-instance identical-result fixtures. Status:
+  complete at `6833358`. The N-point splitter, generated step thunks and
+  publication table, frame hidden domain/scope slots, adopting begins,
+  root-as-task entry, park-marker lowering, `cleanup<j>` cursor states for
+  suspending hooks, and shielded reverse-order teardown landed with 8/8
+  runtime fixtures (chain, branch/loop, cleanup, cancellation reverse order,
+  park timer, suspending cleanup hook, recursion), ASan/UBSan clean, and
+  Go/Alder lockstep goldens including the park marker. The recursive frame
+  self-reference rule is pinned in [MIR](docs/mir.md#recursion). The stage-0
   host stack reservation rose from 64 to 256 MiB because the self-compiled
   compiler's default-method synthesis recursion grows with compiler source
   size; it is a compiler-scaling watch item, not a runtime semantics change.
