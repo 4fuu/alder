@@ -2770,6 +2770,7 @@ fn mir_vframe_phase5(d: Domain, store: MirStore, indexes: MirVIndexes, out0: __s
                                     if part != 0 { let rec = __s0_buffer_get(MirTypePartRec, store.type_parts, part - 1)
                                         if mir_vframe_indexed(store, rec.name_start, rec.name_end, "x") != 0 { allowed = true } }
                                 }
+                                if x.op == mir_op_task_spawn() && x.b == value { allowed = true }
                             }
                             if !allowed { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_typing(), mir_vdiag_frame_escape(), function, use.block, use.instruction, 0, use.operand, v.value_type, vi, 0, 0, value)) }
                         }
@@ -3444,7 +3445,17 @@ fn mir_vframe_phase6(d: Domain, store: MirStore, indexes: MirVIndexes, out0: __s
                                     if mir_vframe_indexed(store, rec.name_start, rec.name_end, "x") != 0 { valid_target = true } } }
                             sj = sj + 1 }
                         sb = sb + 1 }
-                    if stores != 1 || !valid_target { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), mir_vdiag_frame_alloc_use(), function, ab, aid, 0, 0, alloc.type_op, function, 0, 0, alloc.result)) }
+                    // A spawn site consumes the fresh frame as the task.spawn
+                    // frame operand instead of storing it into x<i>.
+                    var spawned = false
+                    sb = 1
+                    while sb <= bcount { let scount = mir_vindex_instr_count(indexes, function, sb)
+                        var sj: U64 = 0
+                        while sj < scount { let st = __s0_buffer_get(MirInstrRec, store.instructions, mir_vindex_instr(indexes, function, sb, sj) - 1)
+                            if st.op == mir_op_task_spawn() && st.b == alloc.result { spawned = true }
+                            sj = sj + 1 }
+                        sb = sb + 1 }
+                    if !spawned && (stores != 1 || !valid_target) { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), mir_vdiag_frame_alloc_use(), function, ab, aid, 0, 0, alloc.type_op, function, 0, 0, alloc.result)) }
                 }
                 ai = ai + 1 }
             ab = ab + 1
@@ -3567,35 +3578,40 @@ fn mir_vframe_zero_anchor() -> MirVFrameAnchor {
     return MirVFrameAnchor(pos: 0, block: 0, instruction: 0)
 }
 
-// The adopting begin must store its result exactly once into a frame s<i>
-// field. All emissions storing the same field are one dynamic scope.
+// The adopting begin anchors the frame s<i> field it stores into. All
+// emissions storing the same field are one dynamic scope; a suspend block may
+// store the same begin value again as part of its save list.
 fn mir_vframe_begin_anchor(store: MirStore, indexes: MirVIndexes, function: U64, scan: MirVFrameScan, frame_index: U64, frame_param: U64, begin: U64) -> MirVFrameAnchor {
     var result = mir_vframe_zero_anchor()
-    var count: U64 = 0
+    let def = mir_vframe_def_instr(store, indexes, function, begin)
+    if def == 0 { return result }
+    let begin_block = __s0_buffer_get(MirInstrRec, store.instructions, def - 1).block
     let bcount = mir_vindex_block_count(indexes, function)
     var block: U64 = 1
     while block <= bcount {
-        let icount = mir_vindex_instr_count(indexes, function, block)
-        var ii: U64 = 0
-        while ii < icount {
-            let iid = mir_vindex_instr(indexes, function, block, ii)
-            let x = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
-            if x.op == mir_op_store() && x.a == begin {
-                let part = mir_vframe_field_part_of(store, indexes, function, x.place, frame_param)
-                if part != 0 {
-                    let pos = mir_vframe_field_pos_part(scan, store, frame_index, part)
-                    if mir_vframe_field_kind_pos(scan, frame_index, pos) == mir_vframe_field_scope() {
-                        count = count + 1
-                        result = MirVFrameAnchor(pos: pos, block: block, instruction: iid)
+        if block == begin_block {
+            let icount = mir_vindex_instr_count(indexes, function, block)
+            var ii: U64 = 0
+            while ii < icount {
+                let iid = mir_vindex_instr(indexes, function, block, ii)
+                if iid > def {
+                    let x = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
+                    if x.op == mir_op_store() && x.a == begin {
+                        let part = mir_vframe_field_part_of(store, indexes, function, x.place, frame_param)
+                        if part != 0 {
+                            let pos = mir_vframe_field_pos_part(scan, store, frame_index, part)
+                            if mir_vframe_field_kind_pos(scan, frame_index, pos) == mir_vframe_field_scope() {
+                                return MirVFrameAnchor(pos: pos, block: block, instruction: iid)
+                            }
+                        }
                     }
                 }
+                ii = ii + 1
             }
-            ii = ii + 1
         }
         block = block + 1
     }
-    if count == 1 { return result }
-    return mir_vframe_zero_anchor()
+    return result
 }
 
 fn mir_vframe_begin_has_scope_store(store: MirStore, indexes: MirVIndexes, function: U64, scan: MirVFrameScan, frame_index: U64, frame_param: U64, begin: U64) -> Bool {

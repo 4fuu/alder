@@ -1147,12 +1147,17 @@ func frameAllocationErrors(m *mir.Module, inv *frameInventory) []Error {
 				}
 				stores := 0
 				validTarget := false
+				spawned := false
 				for _, other := range f.Blocks {
 					if other == nil {
 						continue
 					}
 					for oi := range other.Instrs {
 						x := &other.Instrs[oi]
+						if x.Op == mir.OpTaskSpawn && x.B == in.Result {
+							spawned = true
+							continue
+						}
 						if x.Op != mir.OpStore || x.StoreVal != in.Result {
 							continue
 						}
@@ -1163,7 +1168,7 @@ func frameAllocationErrors(m *mir.Module, inv *frameInventory) []Error {
 						}
 					}
 				}
-				if stores != 1 || !validTarget {
+				if !spawned && (stores != 1 || !validTarget) {
 					errs = append(errs, Error{Loc: loc, Msg: "a frame allocation must be stored exactly once into the allocating step's x<i> field"})
 				}
 			}
@@ -1196,12 +1201,16 @@ func frameScopeAnchors(m *mir.Module, inv *frameInventory, step *frameStepInfo) 
 			if in.Op != mir.OpCleanupScopeBegin || in.Result == mir.NoValue {
 				continue
 			}
+			def := f.Values[in.Result].Def
 			var found []frameScopeAnchor
 			for sbi, sb := range f.Blocks {
-				if sb == nil {
+				if sb == nil || mir.BlockId(sbi) != def.Block {
 					continue
 				}
 				for sii := range sb.Instrs {
+					if sii <= ii {
+						continue
+					}
 					st := &sb.Instrs[sii]
 					if st.Op != mir.OpStore || st.StoreVal != in.Result {
 						continue
@@ -1215,15 +1224,15 @@ func frameScopeAnchors(m *mir.Module, inv *frameInventory, step *frameStepInfo) 
 						continue
 					}
 					found = append(found, frameScopeAnchor{field: field, pos: fi, blk: mir.BlockId(sbi), in: sii})
+					break
+				}
+				if len(found) != 0 {
+					break
 				}
 			}
 			if len(found) == 0 {
 				// A scope that never stores into s<i> stays an ordinary
 				// local scope; phase 7 rejects it if it spans a suspension.
-				continue
-			}
-			if len(found) > 1 {
-				errs = append(errs, Error{Loc: locInstr(f, b, ii, in), Msg: "an adopting cleanup scope begin must be stored exactly once into a frame s<i> field"})
 				continue
 			}
 			anchor := found[0]
