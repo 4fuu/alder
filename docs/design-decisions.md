@@ -484,6 +484,37 @@ per-call recursion storage. The frame representation needs no new MIR
 operation or version; the task surface adds `task.spawn` in MIR 7 through the
 versioning process.
 
+### D030 — Pre-1.0 usability: affine map_err, two targeted diagnostics, retention report
+
+Status: **Frozen 1.0**
+
+Three usability gaps close before 1.0 without adding any language syntax:
+
+1. `core.result.map_err` accepts an affine success value through `take value`:
+   on `Ok` the owner transfers exactly once and the mapper is not called; on
+   `Err` the user-supplied mapper converts the error payload. The target form
+   is `using file = try result.map_err(File.open(io, path), wrap_open_error)`.
+   `try` stays unchanged and never infers an error conversion; the other
+   `core.result` helpers keep their copyable-parameter contract in v1.
+2. Two diagnostics become self-explanatory without a manual: the
+   transferred-owner reuse diagnostic (kind 91) names the owner, the transfer
+   site with its receiving callee, and the reuse site; the `try` error-type
+   mismatch names the callee's error type and the current function's error
+   type and points at the call site where an explicit mapping belongs. No
+   data-flow visualization, no automatic ownership or error fixing.
+3. An on-demand retention report complements `--report-copies`: not copying
+   does not mean releasing early. For each retained temporary it prints the
+   creation site, how long the storage is retained, and the later use that
+   forces retention, or that the compiler cannot prove an earlier release.
+   It explains only: no default warnings and no allocator API.
+
+Rationale: the three answer, in order, how to write the common resource-and-
+error code, why a program does not compile, and why compiled code still holds
+memory. They are worth more before 1.0 than another syntax sugar. The
+snapshot amendment lives in [core.result v1](api/core.result-v1.md), the
+diagnostic acceptance criteria in [Language Semantics](language-semantics.md),
+and the report contract in [Memory and Resources](memory-and-resources.md).
+
 ## Bootstrap decisions
 
 - Go is the temporary Stage 0 implementation language.

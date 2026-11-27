@@ -1,6 +1,6 @@
 # `core.result` Public Signature Snapshot v1
 
-Status: **Milestone 8 frozen snapshot**
+Status: **Milestone 8 frozen snapshot; D030 affine `map_err` amendment recorded, implementation gated with standard-library completion**
 
 This is the versioned public snapshot for the builtin `Result(T, E)` helpers
 in the installed sysroot. It is normative together with the executable example
@@ -18,7 +18,7 @@ pub fn is_ok(T: type, E: type, value: Result(T, E)) -> Bool
 pub fn is_err(T: type, E: type, value: Result(T, E)) -> Bool
 
 pub fn map(T: type, U: type, E: type, value: Result(T, E), f: fn(T) -> U) -> Result(U, E)
-pub fn map_err(T: type, E: type, F: type, value: Result(T, E), f: fn(E) -> F) -> Result(T, F)
+pub fn map_err(T: type, E: type, F: type, take value: Result(T, E), f: fn(E) -> F) -> Result(T, F)
 pub fn and_then(T: type, U: type, E: type, value: Result(T, E), f: fn(T) -> Result(U, E)) -> Result(U, E)
 
 pub fn ok(T: type, E: type, value: Result(T, E)) -> Option(T)
@@ -40,9 +40,19 @@ adds these helpers, imported explicitly like any module and called qualified
   sites omit them when the checker infers them from the arguments and may
   always spell them, in declaration order, as leading arguments.
 - All type parameters must be recursively copyable values, matching the M7
-  value model; an affine owner cannot sit inside a `Result` in this snapshot.
+  value model, except `map_err`'s `T` under the D030 amendment below.
 - `map` and `and_then` pass an error through unchanged and never call `f`;
   `map_err` passes a success through unchanged and never calls `f`.
+- D030 amendment: `map_err` takes its `Result` by `take`, so `T` may be an
+  affine owner such as `File(I)`. On `Ok` the owner transfers exactly once
+  into the result and `f` is not called; on `Err` there is no `T` and `f`
+  converts the error payload, so the caller decides how a lower-level error
+  becomes a business error. For copyable `T`, `take` is an ordinary copy and
+  the caller's binding stays usable. The target form is
+  `using file = try result.map_err(File.open(io, path), wrap_open_error)`.
+  `try` does not infer conversions; the other helpers keep the copyable
+  rule in v1. The amendment lands with its executable example in the
+  implementation commit, following the snapshot process.
 - `ok` and `err` project exactly one side into `Option` and never lose the
   other side's identity: `is_err(v)` and `err(v)` agree on which side holds.
 - Helpers are deterministic pure functions of their arguments: same argument

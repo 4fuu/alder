@@ -2522,6 +2522,19 @@ cross-thread wakeup, and is sequenced so the deterministic core lands first:
    the CPU renderer;
 4. macOS (Metal, Core Text) and Windows (Direct3D 11, DirectWrite).
 
+## Pre-1.0 usability items (D030)
+
+Three usability gaps close before 1.0 without new syntax
+([D030](docs/design-decisions.md#d030--pre-10-usability-affine-map_err-two-targeted-diagnostics-retention-report)):
+the affine `map_err` amendment to the `core.result` v1 snapshot (implemented
+with the Milestone 10 standard-library completion), the two self-explanatory
+diagnostics for transferred-owner reuse and `try` error-type mismatch
+(compiler work after Milestone 9), and the on-demand retention report beside
+`--report-copies` (Milestone 11 tooling). Owning contracts:
+[core.result v1](docs/api/core.result-v1.md),
+[Language Semantics](docs/language-semantics.md), and
+[Memory and Resources](docs/memory-and-resources.md).
+
 ## Deferred Work
 
 The following items are not part of the current implementation scope:

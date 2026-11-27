@@ -62,6 +62,15 @@ the binding, so they read the new value. The compiler's `--report-copies`
 flag prints one line per remaining copy site with its reason after a
 successful check or compile.
 
+Not copying does not mean releasing early: the storage rules above permit a
+temporary to stay retained until a later use or until the compiler cannot
+prove an earlier release. D030 adds an on-demand retention report beside
+`--report-copies` that, for each retained temporary, prints the creation
+site, how long the storage is retained, and the later use that forces the
+retention, or states that no earlier release is provable. The report explains
+only: it is off by default, raises no warnings, and introduces no allocator
+API.
+
 ## Affine owners
 
 Types that represent exactly-once external state are affine. The initial set

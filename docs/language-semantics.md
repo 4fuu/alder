@@ -262,13 +262,30 @@ When `E` contains relocatable collection storage, failed `try` propagation
 materializes the complete `Err(E)` value in caller-result storage before local
 cleanup and function-domain destruction.
 
-Error adaptation uses an explicit `map_error` call or another ordinary
-conversion; it is never implicit. The standard convention is that each module
+Error adaptation uses an explicit `result.map_err` call or another ordinary
+conversion; it is never implicit. Under D030, `map_err` also accepts an affine
+success value through `take`, so `using file = try result.map_err(File.open(io,
+path), wrap_open_error)` transfers the file once on success and maps the error
+only on failure. The standard convention is that each module
 defines its own precise error enum, wraps a lower-level error as a variant
 payload instead of re-exporting it, and reports that payload through the
 `Error` trait's `cause` method (an `ErrorReport`, D025), so diagnostics can print the whole chain. `try` does not catch bounds, overflow,
 infallible allocation, or C contract violations. If `T` is affine, `try`
 consumes the `Result(T, E)` and transfers the `Ok` owner into its result binding.
+
+### Diagnostic clarity (D030)
+
+Two diagnostics must be understandable without opening a manual; the
+acceptance criterion is that the reader knows which two code sites to look
+at, not a full data-flow visualization or an automatic fix:
+
+- the transferred-owner reuse diagnostic (kind 91) names the owner, the
+  earlier transfer site with the callee that received it, and the reuse site,
+  as two related source spans;
+- the `try` error-type mismatch names the callee's error type and the current
+  function's error type and points at the call site where an explicit mapping
+  (for example `result.map_err`) belongs. It never suggests an implicit
+  conversion.
 
 ## Unrecoverable failure
 
