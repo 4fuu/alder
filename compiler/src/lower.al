@@ -80,9 +80,8 @@ type LowerState {
     local_index: LowerLocalIndex
     // Copy-site report records (D023), collected as copies are emitted.
     reports: __s0_Buffer(CopySiteRec)
-    // Checked call expressions the checker marked potentially suspending, in
-    // emission order: owner, expression, and the emitted call instruction.
-    suspensions: __s0_Buffer(LowerSuspensionRec)
+    // Call sites in emission order for step splitting.
+    suspensions: LowerStepSitesRec
     // Innermost enclosing loop: the block `break` jumps to and the block
     // `continue` jumps to, both zero outside every loop. They ride in the
     // state so a match arm's statement block inherits them without threading
@@ -114,6 +113,15 @@ type LowerSuspensionRec {
     expression: U64
     instruction: U64
     kind: U64
+    spawn_target: U64
+    spawn_group: U64
+    spawn_first: U64
+    spawn_count: U64
+}
+
+type LowerStepSitesRec {
+    sites: __s0_Buffer(LowerSuspensionRec)
+    args: __s0_Buffer(U64)
 }
 
 type LowerMovePlan {
@@ -154,7 +162,7 @@ fn lower_with_loop(state: LowerState, loop_exit: U64, loop_step: U64, loop_envir
     return LowerState(suspensions: state.suspensions, mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, local_index: state.local_index, reports: state.reports, loop_exit: loop_exit, loop_step: loop_step, loop_environment: loop_environment, vec_memo_flag: state.vec_memo_flag, vec_memo_ans: state.vec_memo_ans, vec_memo_seen: state.vec_memo_seen, vec_memo_gen: state.vec_memo_gen, valid: state.valid)
 }
 
-fn lower_with_suspensions(state: LowerState, suspensions: __s0_Buffer(LowerSuspensionRec)) -> LowerState {
+fn lower_with_suspensions(state: LowerState, suspensions: LowerStepSitesRec) -> LowerState {
     return LowerState(suspensions: suspensions, mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, local_index: state.local_index, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment, vec_memo_flag: state.vec_memo_flag, vec_memo_ans: state.vec_memo_ans, vec_memo_seen: state.vec_memo_seen, vec_memo_gen: state.vec_memo_gen)
 }
 
@@ -2179,8 +2187,8 @@ fn lower_binding_call_step(d: Domain, store: CheckStore, state: LowerState, owne
         ordinal = ordinal + 1
     }
     if annotation.kind == 7 && annotation.suspends != 0 {
-        let records = try __s0_buffer_append(LowerSuspensionRec, d, current.suspensions, LowerSuspensionRec(owner: owner, expression: expression, instruction: instr.id, kind: 1))
-        current = lower_with_suspensions(current, records)
+        let records = try __s0_buffer_append(LowerSuspensionRec, d, current.suspensions.sites, LowerSuspensionRec(owner: owner, expression: expression, instruction: instr.id, kind: 1, spawn_target: 0, spawn_group: 0, spawn_first: 0, spawn_count: 0))
+        current = lower_with_suspensions(current, LowerStepSitesRec(sites: records, args: current.suspensions.args))
     }
     return Ok(LowerStep(state: current, id: result))
 }
@@ -4841,6 +4849,12 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
     if expression.kind == 27 || expression.kind == 28 {
         return lower_c_field_access(d, source_state, spans, store, state, owner, function, block, expression_id, expression, environment, panic_block)
     }
+    if expression.kind == checked_expr_pending() {
+        let typ = try lower_type(d, source_state, store, state, expression.checked_type)
+        let result = try lower_add_typed_result(d, typ.state, function, block, typ.id)
+        let constructed = try lower_add_instr(d, result.state, function, block, mir_op_aggregate_construct(), result.id, 0, typ.id, 0, 0, 0, "")
+        return Ok(LowerStep(state: constructed.state, id: result.id))
+    }
     if expression.kind == 23 {
         let typ = try lower_type(d, source_state, store, state, expression.checked_type)
         var current = typ.state
@@ -5154,13 +5168,42 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, expression.annotation - 1)
         if annotation.owner != owner { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
         var current = state
+        var spawn_target: U64 = 0
+        var spawn_group: U64 = 0
         var args = try __s0_buffer_new(U64, d)
         var owners = try __s0_buffer_new(U64, d)
+        var spawn_args = args
         var ordinal: U64 = 0
         while ordinal < expression.child_count {
             if expression.first_child == 0 || expression.first_child - 1 + ordinal >= __s0_buffer_len(CheckedExprChildRec, store.expression_children) { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
             let child_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1 + ordinal).expression
             let checked_child = __s0_buffer_get(CheckedExprRec, store.expressions, child_id - 1)
+            if ordinal == 1 && check_bootstrap_private() && annotation.kind == 1 && checked_child.kind == checked_expr_pending() && lower_task_spawn_target(source_state, store, annotation.target) {
+                let receiver = __s0_buffer_get(U64, args, 0)
+                let receivers = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1)
+                let receiver_expr = __s0_buffer_get(CheckedExprRec, store.expressions, receivers.expression - 1)
+                let receiver_type = try lower_type(d, source_state, store, current, receiver_expr.checked_type)
+                current = receiver_type.state
+                let group = lower_step_field_part_named(current.mir, receiver_type.id, "group")
+                if group.owner == receiver_type.id && group.part_type == mir_type_u64() {
+                    let base = try mir_add_place(d, current.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: receiver))
+                    let loaded = try lower_step_load_field(d, lower_with_mir(current, base.store), function, lower_open_block(current.mir, function, block), base.id, group)
+                    current = loaded.state
+                    spawn_group = loaded.id
+                    let pending = __s0_buffer_get(CallAnnotationRec, store.call_annotations, checked_child.annotation - 1)
+                    spawn_target = pending.target
+                    spawn_args = try __s0_buffer_new(U64, d)
+                    var pending_at: U64 = 0
+                    while pending_at < checked_child.child_count {
+                        let arg_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, checked_child.first_child - 1 + pending_at).expression
+                        let arg = try lower_expression(d, source_state, spans, store, current, owner, function, block, arg_id, environment, panic_block)
+                        if !arg.state.valid { return Ok(arg) }
+                        current = arg.state
+                        if arg.id != 0 { spawn_args = try __s0_buffer_append(U64, d, spawn_args, arg.id) }
+                        pending_at = pending_at + 1
+                    }
+                }
+            }
             var child = LowerStep(state: current, id: 0)
             var borrow_kind: U64 = 0
             var sequence_borrow = false
@@ -5267,10 +5310,21 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
             if target == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
             let instr = try lower_add_instr(d, current, function, block, op, result, 0, 0, 0, 0, target, "")
             current = instr.state
-            if annotation.kind == 1 && annotation.suspends != 0 {
-                let records = try __s0_buffer_append(LowerSuspensionRec, d, current.suspensions, LowerSuspensionRec(owner: owner, expression: expression_id, instruction: instr.id, kind: 0))
-                current = lower_with_suspensions(current, records)
-            }
+            if spawn_target != 0 {
+                var saved_args = current.suspensions.args
+                let first = __s0_buffer_len(U64, saved_args)
+                let count = __s0_buffer_len(U64, spawn_args)
+                var at: U64 = 0
+                while at < count {
+                    saved_args = try __s0_buffer_append(U64, d, saved_args, __s0_buffer_get(U64, spawn_args, at))
+                    at = at + 1
+                }
+                let records = try __s0_buffer_append(LowerSuspensionRec, d, current.suspensions.sites, LowerSuspensionRec(owner: owner, expression: expression_id, instruction: instr.id, kind: 2, spawn_target: spawn_target, spawn_group: spawn_group, spawn_first: first, spawn_count: count))
+                current = lower_with_suspensions(current, LowerStepSitesRec(sites: records, args: saved_args))
+            } else { if annotation.kind == 1 && (annotation.suspends != 0 || check_bootstrap_private()) {
+                let records = try __s0_buffer_append(LowerSuspensionRec, d, current.suspensions.sites, LowerSuspensionRec(owner: owner, expression: expression_id, instruction: instr.id, kind: 0, spawn_target: 0, spawn_group: 0, spawn_first: 0, spawn_count: 0))
+                current = lower_with_suspensions(current, LowerStepSitesRec(sites: records, args: current.suspensions.args))
+            } }
             ordinal = 0
             var argument_ordinal: U64 = 0
             if annotation.kind == 1 && current.has_storage && !lower_owner_aliases_domain(source_state, store, annotation.target) {
@@ -8731,7 +8785,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
     at = 0
     while at < __s0_buffer_len(CallAnnotationRec, store.call_annotations) {
         let item = __s0_buffer_get(CallAnnotationRec, store.call_annotations, at)
-        if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.kind == 0 || item.kind > 8 || !lower_type_concrete(store, item.checked_type) { return false }
+        if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.kind == 0 || item.kind > 9 || !lower_type_concrete(store, item.checked_type) { return false }
         let owner = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
         if !lower_owner_concrete(store, item.owner) { return false }
         if item.kind == 6 {
@@ -8762,6 +8816,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         } else {
         if item.target == 0 || item.target > __s0_buffer_len(SymbolRec, store.symbols) || item.builtin != 0 { return false }
         let target = __s0_buffer_get(SymbolRec, store.symbols, item.target - 1)
+        if item.kind == 9 && (!lower_owner_concrete(store, item.target) || item.suspends != 0) { return false }
         if item.kind == 1 {
             if !lower_owner_concrete(store, item.target) { return false }
             var result_role: U64 = 6
@@ -8796,7 +8851,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
     while at < __s0_buffer_len(CheckedExprRec, store.expressions) {
         let item = __s0_buffer_get(CheckedExprRec, store.expressions, at)
         if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || !lower_type_concrete(store, item.checked_type) { return false }
-        if item.kind == 0 || item.kind == 25 || item.kind > 40 { return false }
+        if item.kind == 0 || item.kind == 25 || item.kind > checked_expr_pending() { return false }
         let owner = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
         if !lower_owner_concrete(store, item.owner) { return false }
         if item.left != 0 || item.right != 0 { return false }
@@ -8978,7 +9033,11 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
                 if item.annotation == 0 || item.annotation > __s0_buffer_len(CallAnnotationRec, store.call_annotations) { return false }
                 let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, item.annotation - 1)
                 if annotation.owner != item.owner || annotation.checked_type != item.checked_type || !lower_builtin_model_valid(store, annotation, item) { return false }
-            } else { if item.annotation != 0 { return false } }
+            } else { if item.kind == checked_expr_pending() {
+                if item.annotation == 0 || item.annotation > annotation_count || task_type_kind(source_state, store, item.checked_type) != 3 { return false }
+                let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, item.annotation - 1)
+                if annotation.kind != 9 || annotation.owner != item.owner || annotation.checked_type != item.checked_type { return false }
+            } else { if item.annotation != 0 { return false } } }
         }
         if item.kind == 12 {
             if item.child_count != 1 || item.parameter_use == 0 || item.parameter_use > __s0_buffer_len(CheckedMatchRec, store.control.matches) { return false }
@@ -9512,7 +9571,7 @@ fn lower_checked(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanR
     let binding_statements = try lower_binding_statement_indexes(d, store)
     let locals = try lower_local_indexes(d, store)
     let copy_reports = try __s0_buffer_new(CopySiteRec, d)
-    let suspension_records = try __s0_buffer_new(LowerSuspensionRec, d)
+    let suspension_records = LowerStepSitesRec(sites: try __s0_buffer_new(LowerSuspensionRec, d), args: try __s0_buffer_new(U64, d))
     let part_head = try __s0_buffer_new(U64, d)
     let part_next = try __s0_buffer_new(U64, d)
     let vec_memo_flag = try __s0_buffer_new(U64, d)
@@ -9634,6 +9693,7 @@ type LowerStepParamRec {
 type LowerStepLayoutRec {
     owner: U64
     function: U64
+    step_function: U64
     state: U64
     frame: U64
     first_point: U64
@@ -9903,7 +9963,17 @@ fn lower_step_flags_closure(d: Domain, store0: CheckStore, flags0: __s0_Buffer(U
     return Ok(flags)
 }
 
-fn lower_step_flags_base(d: Domain, source_state: State, store0: CheckStore) -> Result(LowerStepFlagsRec, __s0_Error) {
+fn lower_task_spawn_target(source_state: State, store: CheckStore, owner: U64) -> Bool {
+    let symbol = __s0_buffer_get(SymbolRec, store.symbols, owner - 1)
+    if symbol.inherent_owner == 0 || !source_path_suffix_is(source_state, symbol.source, "std/task.al") { return false }
+    if !symbol_name_matches_word(source_state, symbol, "spawn") && !symbol_name_matches_word(source_state, symbol, "start") { return false }
+    var parameter_role: U64 = 5
+    if symbol.kind == 13 { parameter_role = 7 }
+    let receiver = lower_use_by_role(store, owner, parameter_role, 0)
+    return receiver != 0 && task_type_kind(source_state, store, __s0_buffer_get(DeclTypeUseRec, store.uses, receiver - 1).checked_type) == 2
+}
+
+fn lower_step_flags_base(d: Domain, source_state: State, store0: CheckStore, state: LowerState) -> Result(LowerStepFlagsRec, __s0_Error) {
     var flags = try lower_step_bits_zero(d, __s0_buffer_len(SymbolRec, store0.symbols))
     // A symbol is a step candidate only when it has a concrete function and is
     // not a closure thunk or a C export. Closures and C callbacks never
@@ -9912,12 +9982,21 @@ fn lower_step_flags_base(d: Domain, source_state: State, store0: CheckStore) -> 
     var owner: U64 = 1
     while owner <= __s0_buffer_len(SymbolRec, store.symbols) {
         let symbol = __s0_buffer_get(SymbolRec, store.symbols, owner - 1)
-        if lower_owner_concrete(store, owner) && !symbol.c_export && lower_closure_site_for(store, owner) == 0 {
+        if lower_owner_concrete(store, owner) && !symbol.c_export && lower_closure_site_for(store, owner) == 0 && !lower_task_spawn_target(source_state, store, owner) {
             let probe = try lower_step_signature_probe(d, source_state, store, owner)
             store = probe.store
             if probe.value { flags = lower_step_put_bit(flags, owner - 1) }
         }
         owner = owner + 1
+    }
+    var at: U64 = 0
+    while at < __s0_buffer_len(LowerSuspensionRec, state.suspensions.sites) {
+        let site = __s0_buffer_get(LowerSuspensionRec, state.suspensions.sites, at)
+        if site.spawn_target != 0 {
+            flags = lower_step_put_bit(flags, site.owner - 1)
+            flags = lower_step_put_bit(flags, site.spawn_target - 1)
+        }
+        at = at + 1
     }
     flags = try lower_step_flags_closure(d, store, flags)
     return Ok(LowerStepFlagsRec(store: store, flags: flags))
@@ -9932,7 +10011,7 @@ fn lower_step_point_order(spans: __s0_Buffer(CheckedSpanRec), expression: Checke
 // Suspension points in evaluation order. The checked expression table is
 // post-order for nested calls, and span ends order sibling evaluations; the
 // stable expression id breaks every remaining tie.
-fn lower_step_points(d: Domain, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, flags: __s0_Buffer(U64), owner: U64) -> Result(__s0_Buffer(LowerStepPointRec), __s0_Error) {
+fn lower_step_points(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, flags: __s0_Buffer(U64), owner: U64) -> Result(__s0_Buffer(LowerStepPointRec), __s0_Error) {
     var points = try __s0_buffer_new(LowerStepPointRec, d)
     var at: U64 = 0
     while at < __s0_buffer_len(CheckedExprRec, store.expressions) {
@@ -9941,7 +10020,7 @@ fn lower_step_points(d: Domain, spans: __s0_Buffer(CheckedSpanRec), store: Check
             let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, expression.annotation - 1)
             var callee: U64 = 0
             var kind: U64 = 2
-            if annotation.kind == 1 && annotation.target != 0 && lower_step_flat_get(flags, 0, annotation.target - 1) { callee = annotation.target
+            if annotation.kind == 1 && annotation.target != 0 && lower_step_flat_get(flags, 0, annotation.target - 1) && !lower_task_spawn_target(source_state, store, annotation.target) { callee = annotation.target
                 kind = 0 }
             if annotation.kind == 7 && annotation.suspends != 0 { kind = 1 }
             if kind != 2 {
@@ -10091,7 +10170,18 @@ fn lower_step_mark_operand_values(store: MirStore, owner: U64, kind: U64, values
     return out
 }
 
-fn lower_step_instr_value_use(store: MirStore, instruction: U64, item: MirInstrRec, values: __s0_Buffer(U64), base: U64) -> __s0_Buffer(U64) {
+fn lower_step_spawn_site(sites: __s0_Buffer(LowerSuspensionRec), instruction: U64) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(LowerSuspensionRec, sites) {
+        let site = __s0_buffer_get(LowerSuspensionRec, sites, at)
+        if site.instruction == instruction && site.spawn_target != 0 { return at + 1 }
+        at = at + 1
+    }
+    return 0
+}
+
+fn lower_step_instr_value_use(state: LowerState, instruction: U64, item: MirInstrRec, values: __s0_Buffer(U64), base: U64) -> __s0_Buffer(U64) {
+    let store = state.mir
     var out = values
     if item.a != 0 { out = lower_step_flat_put(out, base, item.a - 1) }
     if item.b != 0 { out = lower_step_flat_put(out, base, item.b - 1) }
@@ -10099,6 +10189,18 @@ fn lower_step_instr_value_use(store: MirStore, instruction: U64, item: MirInstrR
     out = lower_step_mark_place_values(store, item.place, out, base)
     out = lower_step_mark_operand_values(store, instruction, mir_operand_instruction(), out, base)
     out = lower_step_mark_operand_values(store, instruction, mir_operand_aggregate_field(), out, base)
+    if item.op == mir_op_call() {
+        let site_at = lower_step_spawn_site(state.suspensions.sites, instruction)
+        if site_at != 0 {
+            let site = __s0_buffer_get(LowerSuspensionRec, state.suspensions.sites, site_at - 1)
+            out = lower_step_flat_put(out, base, site.spawn_group - 1)
+            var at: U64 = 0
+            while at < site.spawn_count {
+                out = lower_step_flat_put(out, base, __s0_buffer_get(U64, state.suspensions.args, site.spawn_first + at) - 1)
+                at = at + 1
+            }
+        }
+    }
     return out
 }
 
@@ -10186,7 +10288,8 @@ fn lower_step_block_value_params(store: MirStore, function: U64, block: U64) -> 
     return 0
 }
 
-fn lower_step_cfg_build(d: Domain, store: MirStore, indexes: MirVIndexes, function: U64) -> Result(LowerStepCfgRec, __s0_Error) {
+fn lower_step_cfg_build(d: Domain, state: LowerState, indexes: MirVIndexes, function: U64) -> Result(LowerStepCfgRec, __s0_Error) {
+    let store = state.mir
     let block_count = mir_vindex_block_count(indexes, function)
     var value_count: U64 = 0
     var local_count: U64 = 0
@@ -10245,7 +10348,7 @@ fn lower_step_cfg_build(d: Domain, store: MirStore, indexes: MirVIndexes, functi
             let item = __s0_buffer_get(MirInstrRec, store.instructions, instruction - 1)
             scratch_use = lower_step_flat_clear(scratch_use, 0, value_words)
             scratch_def = lower_step_flat_clear(scratch_def, 0, value_words)
-            scratch_use = lower_step_instr_value_use(store, instruction, item, scratch_use, 0)
+            scratch_use = lower_step_instr_value_use(state, instruction, item, scratch_use, 0)
             scratch_def = lower_step_instr_value_def(item, scratch_def, 0)
             var word: U64 = 0
             while word < value_words {
@@ -10298,30 +10401,43 @@ fn lower_step_cfg_build(d: Domain, store: MirStore, indexes: MirVIndexes, functi
         block = block + 1
     }
     var cfg = LowerStepCfgRec(block_count: block_count, value_count: value_count, local_count: local_count, value_words: value_words, local_words: local_words, block_words: block_words, value_use: value_use, value_def: value_def, local_use: local_use, local_def: local_def, value_in: value_in, value_out: value_out, local_in: local_in, local_out: local_out, dom: dom)
-    cfg = try lower_step_cfg_liveness(d, store, function, cfg)
-    cfg = try lower_step_cfg_dominators(d, store, function, cfg)
+    cfg = try lower_step_cfg_liveness(d, store, indexes, function, cfg)
+    cfg = try lower_step_cfg_dominators(d, store, indexes, function, cfg)
     return Ok(cfg)
 }
 
-fn lower_step_successors(d: Domain, store: MirStore, term: MirTermRec) -> Result(__s0_Buffer(U64), __s0_Error) {
+fn lower_step_successors(d: Domain, store: MirStore, indexes: MirVIndexes, function: U64, block: U64) -> Result(__s0_Buffer(U64), __s0_Error) {
     var targets = try __s0_buffer_new(U64, d)
+    let count = mir_vindex_instr_count(indexes, function, block)
+    var at: U64 = 0
+    while at < count {
+        let id = mir_vindex_instr(indexes, function, block, at)
+        let item = __s0_buffer_get(MirInstrRec, store.instructions, id - 1)
+        if mir_vop_checked(item.op) && item.target != 0 { targets = try __s0_buffer_append(U64, d, targets, item.target) }
+        at = at + 1
+    }
+    let term_id = mir_vindex_term(indexes, function, block)
+    if term_id == 0 { return Ok(targets) }
+    let term = __s0_buffer_get(MirTermRec, store.terminators, term_id - 1)
     if term.kind == mir_term_jump() && term.target != 0 { targets = try __s0_buffer_append(U64, d, targets, term.target) }
     if term.kind == mir_term_branch() {
         if term.then_block != 0 { targets = try __s0_buffer_append(U64, d, targets, term.then_block) }
         if term.else_block != 0 { targets = try __s0_buffer_append(U64, d, targets, term.else_block) }
     }
     if term.kind == mir_term_switch() {
-        var at: U64 = 0
-        while at < __s0_buffer_len(MirOperandRec, store.operands) {
-            let operand = __s0_buffer_get(MirOperandRec, store.operands, at)
-            if operand.owner == term.block && operand.kind == mir_operand_switch_case() && operand.target != 0 { targets = try __s0_buffer_append(U64, d, targets, operand.target) }
+        let operand_count = mir_vindex_op_term_count(indexes, term_id)
+        at = 0
+        while at < operand_count {
+            let id = mir_vindex_op_term(indexes, term_id, at)
+            let operand = __s0_buffer_get(MirOperandRec, store.operands, id - 1)
+            if operand.kind == mir_operand_switch_case() && operand.target != 0 { targets = try __s0_buffer_append(U64, d, targets, operand.target) }
             at = at + 1
         }
     }
     return Ok(targets)
 }
 
-fn lower_step_cfg_liveness(d: Domain, store: MirStore, function: U64, cfg0: LowerStepCfgRec) -> Result(LowerStepCfgRec, __s0_Error) {
+fn lower_step_cfg_liveness(d: Domain, store: MirStore, indexes: MirVIndexes, function: U64, cfg0: LowerStepCfgRec) -> Result(LowerStepCfgRec, __s0_Error) {
     var cfg = cfg0
     var changed = true
     var rounds: U64 = 0
@@ -10330,9 +10446,7 @@ fn lower_step_cfg_liveness(d: Domain, store: MirStore, function: U64, cfg0: Lowe
         rounds = rounds + 1
         var block: U64 = 1
         while block <= cfg.block_count {
-            var targets = try __s0_buffer_new(U64, d)
-            let term_id = lower_step_term_for(store, function, block)
-            if term_id != 0 { targets = try lower_step_successors(d, store, __s0_buffer_get(MirTermRec, store.terminators, term_id - 1)) }
+            let targets = try lower_step_successors(d, store, indexes, function, block)
             let out_base = block * cfg.value_words
             let local_out_base = block * cfg.local_words
             var out = lower_step_flat_clear(cfg.value_out, out_base, cfg.value_words)
@@ -10377,7 +10491,7 @@ fn lower_step_term_for(store: MirStore, function: U64, block: U64) -> U64 {
     return 0
 }
 
-fn lower_step_cfg_dominators(d: Domain, store: MirStore, function: U64, cfg0: LowerStepCfgRec) -> Result(LowerStepCfgRec, __s0_Error) {
+fn lower_step_cfg_dominators(d: Domain, store: MirStore, indexes: MirVIndexes, function: U64, cfg0: LowerStepCfgRec) -> Result(LowerStepCfgRec, __s0_Error) {
     var cfg = cfg0
     var all = try lower_step_bits_zero(d, cfg.block_words * 64)
     var block: U64 = 1
@@ -10405,22 +10519,7 @@ fn lower_step_cfg_dominators(d: Domain, store: MirStore, function: U64, cfg0: Lo
             var has_pred = false
             var pred: U64 = 1
             while pred <= cfg.block_count {
-                let term_id = lower_step_term_for(store, function, pred)
-                var is_pred = false
-                if term_id != 0 {
-                    let term = __s0_buffer_get(MirTermRec, store.terminators, term_id - 1)
-                    if term.kind == mir_term_jump() && term.target == block { is_pred = true }
-                    if term.kind == mir_term_branch() && (term.then_block == block || term.else_block == block) { is_pred = true }
-                    if term.kind == mir_term_switch() {
-                        var at: U64 = 0
-                        while at < __s0_buffer_len(MirOperandRec, store.operands) {
-                            let operand = __s0_buffer_get(MirOperandRec, store.operands, at)
-                            if operand.owner == term_id && operand.kind == mir_operand_switch_case() && operand.target == block { is_pred = true }
-                            at = at + 1
-                        }
-                    }
-                }
-                if is_pred {
+                if mir_vframe_edge(store, indexes, function, pred, block) != 0 {
                     has_pred = true
                     var word: U64 = 0
                     while word < cfg.block_words {
@@ -10449,8 +10548,8 @@ fn lower_step_dominates(cfg: LowerStepCfgRec, dominator: U64, block: U64) -> Boo
 
 fn lower_step_point_instruction(state: LowerState, owner: U64, expression: U64) -> U64 {
     var at: U64 = 0
-    while at < __s0_buffer_len(LowerSuspensionRec, state.suspensions) {
-        let record = __s0_buffer_get(LowerSuspensionRec, state.suspensions, at)
+    while at < __s0_buffer_len(LowerSuspensionRec, state.suspensions.sites) {
+        let record = __s0_buffer_get(LowerSuspensionRec, state.suspensions.sites, at)
         if record.owner == owner && record.expression == expression { return record.instruction }
         at = at + 1
     }
@@ -10490,7 +10589,8 @@ fn lower_step_instruction_available(cfg: LowerStepCfgRec, value: MirValueRec, ca
     return lower_step_dominates(cfg, value.block, call_block)
 }
 
-fn lower_step_value_live_after(d: Domain, store: MirStore, indexes: MirVIndexes, cfg: LowerStepCfgRec, function: U64, instruction: U64) -> Result(__s0_Buffer(U64), __s0_Error) {
+fn lower_step_value_live_after(d: Domain, state: LowerState, indexes: MirVIndexes, cfg: LowerStepCfgRec, function: U64, instruction: U64) -> Result(__s0_Buffer(U64), __s0_Error) {
+    let store = state.mir
     let item = lower_step_instr_by_id(store, instruction)
     var live = try lower_step_bits_zero(d, cfg.value_words * 64)
     live = lower_step_flat_copy(d, live, 0, cfg.value_out, item.block * cfg.value_words, cfg.value_words)
@@ -10511,7 +10611,7 @@ fn lower_step_value_live_after(d: Domain, store: MirStore, indexes: MirVIndexes,
         let after_item = __s0_buffer_get(MirInstrRec, store.instructions, after - 1)
         var use = try lower_step_bits_zero(d, cfg.value_words * 64)
         var def = try lower_step_bits_zero(d, cfg.value_words * 64)
-        use = lower_step_instr_value_use(store, after, after_item, use, 0)
+        use = lower_step_instr_value_use(state, after, after_item, use, 0)
         def = lower_step_instr_value_def(after_item, def, 0)
         live = lower_step_flat_minus_or(d, live, 0, def, 0, use, 0, cfg.value_words)
     }
@@ -11204,7 +11304,7 @@ fn lower_step_owner_supported(d: Domain, source_state: State, spans: __s0_Buffer
     if !lower_owner_concrete(store, owner) { return Ok(false) }
     let symbol = __s0_buffer_get(SymbolRec, store.symbols, owner - 1)
     if symbol.c_export || lower_closure_site_for(store, owner) != 0 { return Ok(false) }
-    let points = try lower_step_points(d, spans, store, flags, owner)
+    let points = try lower_step_points(d, source_state, spans, store, flags, owner)
     let function = lower_owner_lookup(state.owners, owner)
     if function == 0 { return Ok(false) }
     if __s0_buffer_len(LowerStepPointRec, points) == 1 {
@@ -11299,13 +11399,20 @@ fn lower_step_types(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         owner = 1
         while owner <= symbol_count {
             if lower_step_flat_get(flags, 0, owner - 1) && !lower_step_flat_get(emitted, 0, owner - 1) && picked == 0 {
-                let points = try lower_step_points(d, spans, store, flags, owner)
+                let points = try lower_step_points(d, source_state, spans, store, flags, owner)
                 var ready = true
                 var point_at: U64 = 0
                 while point_at < __s0_buffer_len(LowerStepPointRec, points) {
                     let callee = __s0_buffer_get(LowerStepPointRec, points, point_at).callee
                     if callee != owner && callee >= 1 && callee <= symbol_count && lower_step_flat_get(flags, 0, callee - 1) && !lower_step_flat_get(emitted, 0, callee - 1) { ready = false }
                     point_at = point_at + 1
+                }
+                var cleanup_at: U64 = 0
+                while ready && cleanup_at < __s0_buffer_len(CheckedCleanupRec, store.control.cleanups) {
+                    let cleanup = __s0_buffer_get(CheckedCleanupRec, store.control.cleanups, cleanup_at)
+                    let callee = cleanup.callback
+                    if cleanup.owner == owner && callee != owner && callee != 0 && lower_step_flat_get(flags, 0, callee - 1) && !lower_step_flat_get(emitted, 0, callee - 1) { ready = false }
+                    cleanup_at = cleanup_at + 1
                 }
                 if ready { picked = owner }
             }
@@ -11319,7 +11426,7 @@ fn lower_step_types(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
             return Ok(layouts)
         }
         let function = lower_owner_lookup(layouts.state.owners, picked)
-        let points = try lower_step_points(d, spans, store, flags, picked)
+        let points = try lower_step_points(d, source_state, spans, store, flags, picked)
         let state_name = try lower_step_instance_name(d, layouts.state.mir, function, "__alder_step.state.")
         let frame_name = try lower_step_instance_name(d, layouts.state.mir, function, "__alder_step.frame.")
         let made_state = try mir_add_named_type(d, layouts.state.mir, mir_type_kind_enum(), state_name)
@@ -11340,7 +11447,7 @@ fn lower_step_types(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
             layouts.points = try __s0_buffer_append(LowerStepPointRec, d, layouts.points, __s0_buffer_get(LowerStepPointRec, points, at))
             at = at + 1
         }
-        layouts.layouts = try __s0_buffer_append(LowerStepLayoutRec, d, layouts.layouts, LowerStepLayoutRec(owner: picked, function: function, state: made_state.type_id, frame: made_frame.type_id, first_point: first_point, point_count: __s0_buffer_len(LowerStepPointRec, points), p_count: 0, x_count: 0, first_pair: 0, pair_count: 0, first_d: 0, d_count: 0, first_l: 0, l_count: 0, first_v: 0, v_count: 0, cleanup_result_pos: 0, first_c: 0, c_count: 0, first_s: 0, s_count: 0))
+        layouts.layouts = try __s0_buffer_append(LowerStepLayoutRec, d, layouts.layouts, LowerStepLayoutRec(owner: picked, function: function, step_function: 0, state: made_state.type_id, frame: made_frame.type_id, first_point: first_point, point_count: __s0_buffer_len(LowerStepPointRec, points), p_count: 0, x_count: 0, first_pair: 0, pair_count: 0, first_d: 0, d_count: 0, first_l: 0, l_count: 0, first_v: 0, v_count: 0, cleanup_result_pos: 0, first_c: 0, c_count: 0, first_s: 0, s_count: 0))
         emitted = lower_step_put_bit(emitted, picked - 1)
         remaining = remaining - 1
     }
@@ -11446,7 +11553,7 @@ fn lower_step_frames(d: Domain, source_state: State, store: CheckStore, flags: _
         let c_first = __s0_buffer_len(U64, layouts.c_values) + 1
         let s_first = __s0_buffer_len(U64, layouts.s_values) + 1
         let indexes = try mir_vindex_build(d, state.mir)
-        let cfg = try lower_step_cfg_build(d, state.mir, indexes, function)
+        let cfg = try lower_step_cfg_build(d, state, indexes, function)
         let vstride = cfg.value_count + 1
         let lstride = cfg.local_count + 1
         var vflags = try lower_step_zero_map(d, layout.point_count * vstride)
@@ -11459,7 +11566,7 @@ fn lower_step_frames(d: Domain, source_state: State, store: CheckStore, flags: _
             let instruction = lower_step_point_instruction(state, owner, point.expression)
             if instruction == 0 { state = lower_invalid(state)
                 return Ok(layouts) }
-            let live_values = try lower_step_value_live_after(d, state.mir, indexes, cfg, function, instruction)
+            let live_values = try lower_step_value_live_after(d, state, indexes, cfg, function, instruction)
             let live_locals = try lower_step_local_live_after(d, state.mir, indexes, cfg, function, instruction)
             let call = lower_step_instr_by_id(state.mir, instruction)
             var value_ordinal: U64 = 0
@@ -11934,6 +12041,11 @@ fn lower_step_invalid_body(body: LowerStepBodyRec) -> LowerStepBodyRec {
     return out
 }
 
+fn lower_step_map_block(body: LowerStepBodyRec, old_block: U64) -> U64 {
+    if old_block == 0 || old_block > body.old_blocks { return 0 }
+    return __s0_buffer_get(U64, body.block_new, old_block - 1)
+}
+
 fn lower_step_add_instr_operands(d: Domain, body0: LowerStepBodyRec, old_instruction: U64, new_instruction: U64, override: __s0_Buffer(U64), use_override: Bool) -> Result(LowerStepBodyRec, __s0_Error) {
     var body = body0
     var at: U64 = 0
@@ -11942,24 +12054,13 @@ fn lower_step_add_instr_operands(d: Domain, body0: LowerStepBodyRec, old_instruc
         if operand.owner == old_instruction && (operand.kind == mir_operand_instruction() || operand.kind == mir_operand_checked_edge_arg() || operand.kind == mir_operand_aggregate_field()) {
             let mapped = lower_step_map_value(body, operand.value, override, use_override)
             var target = operand.target
-            if target != 0 && target <= body.old_blocks { target = __s0_buffer_get(U64, body.block_new, target - 1) }
+            if operand.kind == mir_operand_checked_edge_arg() { target = lower_step_map_block(body, target) }
             let made = try mir_add_operand(d, body.state.mir, MirOperandRec(kind: operand.kind, owner: new_instruction, ordinal: operand.ordinal, edge: operand.edge, value: mapped, target: target, operand_type: operand.operand_type, name_start: operand.name_start, name_end: operand.name_end))
             body.state = lower_with_mir(body.state, made.store)
         }
         at = at + 1
     }
     return Ok(body)
-}
-
-fn lower_step_target_is_block(op: U64) -> Bool {
-    if op == mir_op_alloc_checked() { return true }
-    if op >= mir_op_int_add_checked() && op <= mir_op_int_shr_checked() { return true }
-    if op >= mir_op_slice_index_checked() && op <= mir_op_enum_payload_checked() { return true }
-    if op == mir_op_array_index_checked() { return true }
-    if op == mir_op_vec_construct_checked() || op == mir_op_vec_grow_checked() { return true }
-    if op == mir_op_str_byte_checked() || op == mir_op_str_slice_checked() { return true }
-    if op == mir_op_int_convert_checked() { return true }
-    return false
 }
 
 fn lower_step_local_frame_index(body: LowerStepBodyRec, local_id: U64) -> U64 {
@@ -11981,11 +12082,80 @@ fn lower_step_local_frame_index(body: LowerStepBodyRec, local_id: U64) -> U64 {
     return 0
 }
 
-fn lower_step_clone_instruction(d: Domain, body0: LowerStepBodyRec, old_instruction: U64, new_block: U64, override: __s0_Buffer(U64), use_override: Bool) -> Result(LowerStepBodyRec, __s0_Error) {
+fn lower_step_clone_spawn(d: Domain, body0: LowerStepBodyRec, site: LowerSuspensionRec, callee: LowerStepLayoutRec, block: U64, result: U64, override: __s0_Buffer(U64), use_override: Bool) -> Result(LowerStepBodyRec, __s0_Error) {
+    var body = body0
+    let group = lower_step_map_value(body, site.spawn_group, override, use_override)
+    let fields = try lower_step_callee_frame_fields(d, body.state.mir, callee.frame)
+    if group == 0 || __s0_buffer_len(MirTypePartRec, fields) != site.spawn_count { return Ok(lower_step_invalid_body(body)) }
+    let one = try lower_step_const_get(d, body.state, body.function, block, body.one_name, mir_type_u64())
+    let handle = try lower_step_intern_kind(d, one.state, mir_type_kind_domain_handle())
+    let domain = try lower_step_new_instr_value(d, lower_with_mir(one.state, handle.store), body.function, block, handle.type_id)
+    let created = try lower_add_instr(d, domain.state, body.function, block, mir_op_domain_create(), domain.id, 0, 0, body.frame_owner, 0, 0, "")
+    body.domain_sites = try __s0_buffer_append(U64, d, body.domain_sites, created.id)
+    let empty = try __s0_buffer_new(U64, d)
+    let reference = try mir_intern_type(d, created.state.mir, mir_type_kind_safe_mut(), callee.frame, 0, 0, empty, 0)
+    let child = try lower_step_new_instr_value(d, lower_with_mir(created.state, reference.store), body.function, block, reference.type_id)
+    let allocated = try lower_add_instr(d, child.state, body.function, block, mir_op_alloc(), child.id, 0, callee.frame, domain.id, one.id, 0, "")
+    let place = try mir_add_place(d, allocated.state.mir, MirPlaceRec(function: body.function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: child.id))
+    let entry = try lower_step_enum_construct(d, lower_with_mir(allocated.state, place.store), body.function, block, callee.state, "entry")
+    body.state = try lower_step_store_field(d, entry.state, body.function, block, place.id, lower_step_frame_part_at(entry.state.mir, callee.frame, 0), entry.id)
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirTypePartRec, fields) {
+        let field = __s0_buffer_get(MirTypePartRec, fields, at)
+        let arg = lower_step_map_value(body, __s0_buffer_get(U64, body.state.suspensions.args, site.spawn_first + at), override, use_override)
+        if arg == 0 { return Ok(lower_step_invalid_body(body)) }
+        body.state = try lower_step_store_field(d, body.state, body.function, block, place.id, field, arg)
+        at = at + 1
+    }
+    let task = try lower_step_new_instr_value(d, body.state, body.function, block, mir_type_u64())
+    let spawned = try lower_add_instr_three(d, task.state, body.function, block, mir_op_task_spawn(), task.id, 0, group, child.id, domain.id, callee.step_function)
+    body.state = try lower_step_own_spawn_domain(d, spawned.state, body.function, block, task.id)
+    if result != 0 {
+        let result_type = lower_step_value_by_ordinal(body.state.mir, body.function, result - 1).value_type
+        let wrapped = try lower_add_instr(d, body.state, body.function, block, mir_op_aggregate_construct(), result, 0, result_type, 0, 0, 0, "")
+        let ordinal = lower_step_instr_by_id(wrapped.state.mir, wrapped.id).ordinal
+        body.state = try lower_step_set_value_def(d, wrapped.state, body.function, result, block, ordinal + 1)
+        body.state = try lower_add_instr_operand(d, body.state, wrapped.id, 0, task.id, mir_operand_aggregate_field(), "child")
+    }
+    return Ok(body)
+}
+
+fn lower_step_own_spawn_domain(d: Domain, state: LowerState, function: U64, block: U64, task: U64) -> Result(LowerState, __s0_Error) {
+    let c_id = try mir_intern_c_raw(d, state.mir, 10)
+    var current = lower_with_mir(state, c_id.store)
+    var target: U64 = 0
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirBindingFnRec, current.mir.binding_funcs) && target == 0 {
+        let binding = __s0_buffer_get(MirBindingFnRec, current.mir.binding_funcs, at)
+        if mir_vname_word(current.mir, binding.c_name_start, binding.c_name_end, "task_own_domain") { target = at + 1 }
+        at = at + 1
+    }
+    if target == 0 {
+        let binding = try mir_add_binding(d, current.mir, "alder_step_task_runtime", "std/c/task_shim.h")
+        let fn_rec = try mir_add_binding_fn(d, binding.store, binding.id, "own_domain", "task_own_domain", mir_type_unit())
+        target = fn_rec.id
+        current = lower_with_mir(current, try mir_add_binding_fn_param(d, fn_rec.store, target, 0, c_id.type_id))
+    }
+    let converted = try lower_step_new_instr_value(d, current, function, block, c_id.type_id)
+    let cast = try lower_add_instr(d, converted.state, function, block, mir_op_c_num_cast(), converted.id, 0, c_id.type_id, task, 0, 0, "")
+    let call = try lower_add_instr(d, cast.state, function, block, mir_op_c_binding_call(), 0, 0, 0, 0, 0, target, "")
+    return lower_add_instr_operand(d, call.state, call.id, 0, converted.id, mir_operand_instruction(), "")
+}
+
+fn lower_step_clone_instruction(d: Domain, body0: LowerStepBodyRec, layouts: LowerStepLayoutsRec, old_instruction: U64, new_block: U64, override: __s0_Buffer(U64), use_override: Bool) -> Result(LowerStepBodyRec, __s0_Error) {
     var body = body0
     let item = lower_step_instr_by_id(body.state.mir, old_instruction)
     if item.function != body.old_function { return Ok(lower_step_invalid_body(body)) }
     let result = lower_step_map_value(body, item.result, override, use_override)
+    if item.op == mir_op_call() {
+        let site_at = lower_step_spawn_site(body.state.suspensions.sites, old_instruction)
+        if site_at != 0 {
+            let site = __s0_buffer_get(LowerSuspensionRec, body.state.suspensions.sites, site_at - 1)
+            let callee = lower_step_layout_for(layouts.layouts, site.spawn_target)
+            if callee == 0 { return Ok(lower_step_invalid_body(body)) }
+            return lower_step_clone_spawn(d, body, site, __s0_buffer_get(LowerStepLayoutRec, layouts.layouts, callee - 1), new_block, result, override, use_override)
+        }
+    }
     let place = try lower_step_clone_place(d, body, item.place, override, use_override)
     if !place.state.valid { return Ok(lower_step_invalid_body(body)) }
     body.state = place.state
@@ -11995,7 +12165,6 @@ fn lower_step_clone_instruction(d: Domain, body0: LowerStepBodyRec, old_instruct
     let c = lower_step_map_value(body, item.c, override, use_override)
     var name: __s0_String = ""
     if item.name_start < item.name_end { name = try lower_word(d, body.state.mir.names, item.name_start, item.name_end) }
-    let active = lower_open_block(body.state.mir, body.function, new_block)
     var named = MirNameStep(store: body.state.mir, start: 0, end: 0)
     if len(name) != 0 { named = try mir_append_name(d, body.state.mir, name) }
     // A cleanup entry's owner observes stable storage. A local owner place
@@ -12035,8 +12204,8 @@ fn lower_step_clone_instruction(d: Domain, body0: LowerStepBodyRec, old_instruct
         }
     }
     var target = item.target
-    if lower_step_target_is_block(item.op) && target != 0 && target <= body.old_blocks { target = __s0_buffer_get(U64, body.block_new, target - 1) }
-    let rec = MirInstrRec(function: body.function, block: active, ordinal: lower_instruction_ordinal(named.store, body.function, active), op: item.op, result: result, place: place.id, type_op: item.type_op, a: a, b: b, c: c, target: target, name_start: named.start, name_end: named.end)
+    if mir_vop_checked(item.op) { target = lower_step_map_block(body, target) }
+    let rec = MirInstrRec(function: body.function, block: new_block, ordinal: lower_instruction_ordinal(named.store, body.function, new_block), op: item.op, result: result, place: place.id, type_op: item.type_op, a: a, b: b, c: c, target: target, name_start: named.start, name_end: named.end)
     let made = try mir_add_instruction(d, named.store, rec)
     body.state = lower_with_mir(body.state, made.store)
     if result != 0 {
@@ -12086,12 +12255,9 @@ fn lower_step_clone_terminator(d: Domain, body0: LowerStepBodyRec, old_term: U64
         return lower_step_return_done(d, body, new_block, value)
     }
     let value = lower_step_map_value(body, item.value, override, use_override)
-    var target: U64 = 0
-    var then_block: U64 = 0
-    var else_block: U64 = 0
-    if item.target != 0 && item.target <= body.old_blocks { target = __s0_buffer_get(U64, body.block_new, item.target - 1) }
-    if item.then_block != 0 && item.then_block <= body.old_blocks { then_block = __s0_buffer_get(U64, body.block_new, item.then_block - 1) }
-    if item.else_block != 0 && item.else_block <= body.old_blocks { else_block = __s0_buffer_get(U64, body.block_new, item.else_block - 1) }
+    let target = lower_step_map_block(body, item.target)
+    let then_block = lower_step_map_block(body, item.then_block)
+    let else_block = lower_step_map_block(body, item.else_block)
     let made = try mir_add_terminator(d, body.state.mir, MirTermRec(function: body.function, block: new_block, kind: item.kind, value: value, target: target, then_block: then_block, else_block: else_block))
     body.state = lower_with_mir(body.state, made.store)
     var at: U64 = 0
@@ -12099,14 +12265,12 @@ fn lower_step_clone_terminator(d: Domain, body0: LowerStepBodyRec, old_term: U64
         let operand = __s0_buffer_get(MirOperandRec, body.state.mir.operands, at)
         if operand.owner == old_term && (operand.kind == mir_operand_terminator_arg() || operand.kind == mir_operand_switch_case()) {
             if operand.kind == mir_operand_terminator_arg() {
-                var operand_target: U64 = 0
-                if operand.target != 0 && operand.target <= body.old_blocks { operand_target = __s0_buffer_get(U64, body.block_new, operand.target - 1) }
+                let operand_target = lower_step_map_block(body, operand.target)
                 let added = try mir_add_operand(d, body.state.mir, MirOperandRec(kind: operand.kind, owner: made.id, ordinal: operand.ordinal, edge: operand.edge, value: lower_step_map_value(body, operand.value, override, use_override), target: operand_target, operand_type: 0, name_start: operand.name_start, name_end: operand.name_end))
                 body.state = lower_with_mir(body.state, added.store)
             }
             if operand.kind == mir_operand_switch_case() {
-                var case_target: U64 = 0
-                if operand.target != 0 && operand.target <= body.old_blocks { case_target = __s0_buffer_get(U64, body.block_new, operand.target - 1) }
+                let case_target = lower_step_map_block(body, operand.target)
                 let case_value = lower_step_map_value(body, operand.value, override, use_override)
                 let added = try mir_add_operand(d, body.state.mir, MirOperandRec(kind: operand.kind, owner: made.id, ordinal: operand.ordinal, edge: operand.edge, value: case_value, target: case_target, operand_type: 0, name_start: operand.name_start, name_end: operand.name_end))
                 body.state = lower_with_mir(body.state, added.store)
@@ -12118,7 +12282,7 @@ fn lower_step_clone_terminator(d: Domain, body0: LowerStepBodyRec, old_term: U64
     return Ok(body)
 }
 
-fn lower_step_clone_prefix(d: Domain, body0: LowerStepBodyRec, old_block: U64, new_block: U64, start: U64, end: U64, override: __s0_Buffer(U64), use_override: Bool) -> Result(LowerStepBodyRec, __s0_Error) {
+fn lower_step_clone_prefix(d: Domain, body0: LowerStepBodyRec, layouts: LowerStepLayoutsRec, old_block: U64, new_block: U64, start: U64, end: U64, override: __s0_Buffer(U64), use_override: Bool) -> Result(LowerStepBodyRec, __s0_Error) {
     var body = try lower_step_param_loads(d, body0, new_block)
     if !body.state.valid { return Ok(body) }
     var ordinal = start
@@ -12131,14 +12295,14 @@ fn lower_step_clone_prefix(d: Domain, body0: LowerStepBodyRec, old_block: U64, n
             at = at + 1
         }
         if old_instruction == 0 { return Ok(lower_step_invalid_body(body)) }
-        body = try lower_step_clone_instruction(d, body, old_instruction, new_block, override, use_override)
+        body = try lower_step_clone_instruction(d, body, layouts, old_instruction, new_block, override, use_override)
         if !body.state.valid { return Ok(body) }
         ordinal = ordinal + 1
     }
     return Ok(body)
 }
 
-fn lower_step_clone_block(d: Domain, body0: LowerStepBodyRec, old_block: U64, new_block: U64, override: __s0_Buffer(U64), use_override: Bool) -> Result(LowerStepBodyRec, __s0_Error) {
+fn lower_step_clone_block(d: Domain, body0: LowerStepBodyRec, layouts: LowerStepLayoutsRec, old_block: U64, new_block: U64, override: __s0_Buffer(U64), use_override: Bool) -> Result(LowerStepBodyRec, __s0_Error) {
     var count: U64 = 0
     var at: U64 = 0
     while at < __s0_buffer_len(MirInstrRec, body0.state.mir.instructions) {
@@ -12146,14 +12310,14 @@ fn lower_step_clone_block(d: Domain, body0: LowerStepBodyRec, old_block: U64, ne
         if item.function == body0.old_function && item.block == old_block { count = count + 1 }
         at = at + 1
     }
-    var body = try lower_step_clone_prefix(d, body0, old_block, new_block, 0, count, override, use_override)
+    var body = try lower_step_clone_prefix(d, body0, layouts, old_block, new_block, 0, count, override, use_override)
     if !body.state.valid { return Ok(body) }
     let term = lower_step_term_for(body.state.mir, body.old_function, old_block)
     if term == 0 { return Ok(lower_step_invalid_body(body)) }
     return lower_step_clone_terminator(d, body, term, new_block, override, use_override)
 }
 
-fn lower_step_reachable_blocks(d: Domain, store: MirStore, function: U64, start: U64, block_count: U64) -> Result(__s0_Buffer(U64), __s0_Error) {
+fn lower_step_reachable_blocks(d: Domain, store: MirStore, indexes: MirVIndexes, function: U64, start: U64, block_count: U64) -> Result(__s0_Buffer(U64), __s0_Error) {
     var seen = try lower_step_bits_zero(d, block_count + 1)
     var list = try __s0_buffer_new(U64, d)
     var work = try __s0_buffer_new(U64, d)
@@ -12165,14 +12329,11 @@ fn lower_step_reachable_blocks(d: Domain, store: MirStore, function: U64, start:
         if block == 0 || block > block_count || lower_step_flat_get(seen, 0, block - 1) { } else {
             __s0_buffer_set(U64, seen, (block - 1) / 64, __s0_buffer_get(U64, seen, (block - 1) / 64) + lower_step_pow2((block - 1) % 64))
             list = try __s0_buffer_append(U64, d, list, block)
-            let term = lower_step_term_for(store, function, block)
-            if term != 0 {
-                let targets = try lower_step_successors(d, store, __s0_buffer_get(MirTermRec, store.terminators, term - 1))
-                var target_at: U64 = 0
-                while target_at < __s0_buffer_len(U64, targets) {
-                    work = try __s0_buffer_append(U64, d, work, __s0_buffer_get(U64, targets, target_at))
-                    target_at = target_at + 1
-                }
+            let targets = try lower_step_successors(d, store, indexes, function, block)
+            var target_at: U64 = 0
+            while target_at < __s0_buffer_len(U64, targets) {
+                work = try __s0_buffer_append(U64, d, work, __s0_buffer_get(U64, targets, target_at))
+                target_at = target_at + 1
             }
         }
     }
@@ -12508,7 +12669,7 @@ fn lower_step_build_resume(d: Domain, body0: LowerStepBodyRec, layout: LowerStep
         at = at + 1
     }
     let count = lower_step_block_instr_count(body.state.mir, body.old_function, body.point_block)
-    body = try lower_step_clone_prefix(d, body, body.point_block, body.after, body.point_ordinal + 1, count, override, true)
+    body = try lower_step_clone_prefix(d, body, layouts, body.point_block, body.after, body.point_ordinal + 1, count, override, true)
     if !body.state.valid { return Ok(body) }
     let term = lower_step_term_for(body.state.mir, body.old_function, body.point_block)
     if term == 0 { return Ok(lower_step_invalid_body(body)) }
@@ -12563,10 +12724,7 @@ fn lower_step_one_body(d: Domain, store: CheckStore, layouts: LowerStepLayoutsRe
         if !callee_params.valid { return Ok(lower_invalid(state)) }
         callee_hidden = callee_params.hidden
     }
-    let step_name = try lower_step_instance_name(d, state.mir, old_function, "__alder_step.run.")
-    let made_fn = try mir_add_function(d, state.mir, step_name, layouts.status)
-    state = lower_with_mir(state, made_fn.store)
-    let step_function = made_fn.id
+    let step_function = layout.step_function
     var local_count: U64 = 0
     var local_at: U64 = 0
     while local_at < __s0_buffer_len(MirLocalRec, state.mir.locals) {
@@ -12682,12 +12840,15 @@ fn lower_step_one_body(d: Domain, store: CheckStore, layouts: LowerStepLayoutsRe
     body = try lower_step_cancel_block(d, body, body.cancel_entry, false)
     if !body.state.valid { return Ok(body.state) }
     var region = try __s0_buffer_new(U64, d)
-    if has_point { region = try lower_step_reachable_blocks(d, body.state.mir, old_function, point_block, old_blocks) }
+    if has_point {
+        let indexes = try mir_vindex_build(d, body.state.mir)
+        region = try lower_step_reachable_blocks(d, body.state.mir, indexes, old_function, point_block, old_blocks)
+    }
     old_id = 1
     while old_id <= old_blocks {
         if has_point && old_id == point_block { } else {
             if lower_step_block_in_list(region, old_id) { } else {
-                body = try lower_step_clone_block(d, body, old_id, __s0_buffer_get(U64, block_new, old_id - 1), try lower_step_zero_map(d, old_values), false)
+                body = try lower_step_clone_block(d, body, layouts, old_id, __s0_buffer_get(U64, block_new, old_id - 1), try lower_step_zero_map(d, old_values), false)
                 if !body.state.valid { return Ok(body.state) }
             }
         }
@@ -12695,7 +12856,7 @@ fn lower_step_one_body(d: Domain, store: CheckStore, layouts: LowerStepLayoutsRe
     }
     if has_point {
         let point_new = __s0_buffer_get(U64, block_new, point_block - 1)
-        body = try lower_step_clone_prefix(d, body, point_block, point_new, 0, point_ordinal, try lower_step_zero_map(d, old_values), false)
+        body = try lower_step_clone_prefix(d, body, layouts, point_block, point_new, 0, point_ordinal, try lower_step_zero_map(d, old_values), false)
         if !body.state.valid { return Ok(body.state) }
         let cancelled = try lower_step_cancelled_call(d, body.state, body.function, point_new, body.cancelled_target)
         body.state = cancelled.state
@@ -12712,7 +12873,7 @@ fn lower_step_one_body(d: Domain, store: CheckStore, layouts: LowerStepLayoutsRe
         while ri < __s0_buffer_len(U64, region) {
             let block = __s0_buffer_get(U64, region, ri)
             if block != point_block {
-                body = try lower_step_clone_block(d, body, block, __s0_buffer_get(U64, block_new, block - 1), body.value_map, true)
+                body = try lower_step_clone_block(d, body, layouts, block, __s0_buffer_get(U64, block_new, block - 1), body.value_map, true)
                 if !body.state.valid { return Ok(body.state) }
             }
             ri = ri + 1
@@ -13148,10 +13309,7 @@ fn lower_step_one_body_many(d: Domain, store: CheckStore, layouts: LowerStepLayo
         points = try __s0_buffer_append(LowerStepPointInfoRec, d, points, LowerStepPointInfoRec(instruction: instruction, block: item.block, ordinal: item.ordinal, callee_frame: callee_frame, callee_state: callee_state, callee_hidden: callee_hidden, kind: point.kind, suspend: 0, resume: 0, join: 0, after: 0, cancel_pre: 0, cancel_resume: 0, save_first: saved.first, save_count: saved.count, before_point: 0, next_point: 0))
         pi = pi + 1
     }
-    let step_name = try lower_step_instance_name(d, state.mir, old_function, "__alder_step.run.")
-    let made_fn = try mir_add_function(d, state.mir, step_name, layouts.status)
-    state = lower_with_mir(state, made_fn.store)
-    let step_function = made_fn.id
+    let step_function = layout.step_function
     var local_count: U64 = 0
     var local_at: U64 = 0
     while local_at < __s0_buffer_len(MirLocalRec, state.mir.locals) {
@@ -13187,7 +13345,8 @@ fn lower_step_one_body_many(d: Domain, store: CheckStore, layouts: LowerStepLayo
     state = entry_step.state
     let entry_go_step = try lower_step_add_block(d, state, step_function, 2, "bb_entry_go")
     state = entry_go_step.state
-    let reachable = try lower_step_reachable_blocks(d, state.mir, old_function, 2, old_blocks)
+    let indexes = try mir_vindex_build(d, state.mir)
+    let reachable = try lower_step_reachable_blocks(d, state.mir, indexes, old_function, 2, old_blocks)
     var block_new = try __s0_buffer_new(U64, d)
     block_new = try __s0_buffer_append(U64, d, block_new, entry_go_step.id)
     var block_ordinal: U64 = 3
@@ -13272,8 +13431,7 @@ fn lower_step_one_body_many(d: Domain, store: CheckStore, layouts: LowerStepLayo
     let override_stride = old_values + 1
     var overrides = try lower_step_zero_map(d, layout.point_count * override_stride)
     let empty_override = try lower_step_zero_map(d, override_stride)
-    let indexes = try mir_vindex_build(d, state.mir)
-    let cfg = try lower_step_cfg_build(d, state.mir, indexes, old_function)
+    let cfg = try lower_step_cfg_build(d, state, indexes, old_function)
     var incoming = try lower_step_zero_map(d, old_blocks + 1)
     var b: U64 = 1
     while b <= old_blocks {
@@ -13328,15 +13486,17 @@ fn lower_step_one_body_many(d: Domain, store: CheckStore, layouts: LowerStepLayo
             use = true }
         if first == 0 {
             let rec = lower_step_body_rec_from_n(body, layouts.l_locals, layout.first_l, layout.l_count)
-            let cloned = try lower_step_clone_block(d, rec, b, __s0_buffer_get(U64, body.block_new, b - 1), ov, use)
+            let cloned = try lower_step_clone_block(d, rec, layouts, b, __s0_buffer_get(U64, body.block_new, b - 1), ov, use)
             if !cloned.state.valid { return Ok(cloned.state) }
             body = lower_step_body_n_with_state(body, cloned.state)
+            body.domain_sites = cloned.domain_sites
         } else {
             let info = __s0_buffer_get(LowerStepPointInfoRec, body.points, first - 1)
             let rec = lower_step_body_rec_from_n(body, layouts.l_locals, layout.first_l, layout.l_count)
-            let cloned = try lower_step_clone_prefix(d, rec, b, __s0_buffer_get(U64, body.block_new, b - 1), 0, info.ordinal, ov, use)
+            let cloned = try lower_step_clone_prefix(d, rec, layouts, b, __s0_buffer_get(U64, body.block_new, b - 1), 0, info.ordinal, ov, use)
             if !cloned.state.valid { return Ok(cloned.state) }
             body = lower_step_body_n_with_state(body, cloned.state)
+            body.domain_sites = cloned.domain_sites
             let cancelled = try lower_step_cancelled_call(d, body.state, body.function, __s0_buffer_get(U64, body.block_new, b - 1), body.cancelled_target)
             body.state = cancelled.state
             body.state = try lower_branch(d, body.state, body.function, __s0_buffer_get(U64, body.block_new, b - 1), cancelled.id, info.cancel_pre, info.suspend)
@@ -13352,9 +13512,10 @@ fn lower_step_one_body_many(d: Domain, store: CheckStore, layouts: LowerStepLayo
         var end = count
         if info.next_point != 0 { end = __s0_buffer_get(LowerStepPointInfoRec, body.points, info.next_point - 1).ordinal }
         let rec = lower_step_body_rec_from_n(body, layouts.l_locals, layout.first_l, layout.l_count)
-        let cloned = try lower_step_clone_prefix(d, rec, info.block, info.after, info.ordinal + 1, end, ov, true)
+        let cloned = try lower_step_clone_prefix(d, rec, layouts, info.block, info.after, info.ordinal + 1, end, ov, true)
         if !cloned.state.valid { return Ok(cloned.state) }
         body = lower_step_body_n_with_state(body, cloned.state)
+        body.domain_sites = cloned.domain_sites
         if info.next_point != 0 {
             let next = __s0_buffer_get(LowerStepPointInfoRec, body.points, info.next_point - 1)
             let cancelled = try lower_step_cancelled_call(d, body.state, body.function, info.after, body.cancelled_target)
@@ -13385,6 +13546,16 @@ fn lower_step_bodies(d: Domain, store: CheckStore, layouts: LowerStepLayoutsRec)
     var state = layouts.state
     var at: U64 = 0
     while at < __s0_buffer_len(LowerStepLayoutRec, layouts.layouts) {
+        var layout = __s0_buffer_get(LowerStepLayoutRec, layouts.layouts, at)
+        let name = try lower_step_instance_name(d, state.mir, layout.function, "__alder_step.run.")
+        let function = try mir_add_function(d, state.mir, name, layouts.status)
+        state = lower_with_mir(state, function.store)
+        layout.step_function = function.id
+        __s0_buffer_set(LowerStepLayoutRec, layouts.layouts, at, layout)
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(LowerStepLayoutRec, layouts.layouts) {
         let layout = __s0_buffer_get(LowerStepLayoutRec, layouts.layouts, at)
         if layout.point_count == 0 {
             state = try lower_step_one_body(d, store, layouts, layout, state)
@@ -13411,7 +13582,7 @@ fn lower_step_functions(d: Domain, source_state: State, spans: __s0_Buffer(Check
     // generated C thunks and async entry are still being built; public builds
     // keep the direct bodies so a step module is never compiled without them.
     if !check_bootstrap_private() { return Ok(state) }
-    let base = try lower_step_flags_base(d, source_state, store)
+    let base = try lower_step_flags_base(d, source_state, store, state)
     if __s0_buffer_len(U64, base.flags) == 0 { return Ok(state) }
     // Gate 9.3 splits handoffs to step instances. The module-private
     // await_result placeholder carries suspends=1 without a step instance;
@@ -13449,7 +13620,7 @@ fn lower_step_functions(d: Domain, source_state: State, spans: __s0_Buffer(Check
             owner = owner + 1
         }
         if !stable {
-            let again = try lower_step_flags_base(d, source_state, store)
+            let again = try lower_step_flags_base(d, source_state, store, state)
             flags = again.flags
         }
     }

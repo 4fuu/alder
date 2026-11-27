@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"bytes"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -105,6 +106,166 @@ pub fn main() -> I32 {
 		t.Fatalf("step-lowered MIR has %d frame types, want the handoff chain\n%s", frames, first)
 	}
 	checkLowerGolden(t, "step-dual.mir", first)
+}
+
+func runAlderStepFailureEdgeConformance(t *testing.T, exe string) {
+	t.Helper()
+	files := map[string]string{
+		"private.marker": "Map(\n",
+		"std/io.al": `module std.io
+pub trait Io {}
+pub trait BlockingIo {}
+pub trait AsyncIo {}
+`,
+		"edge.al": `import std.io { AsyncIo, Io }
+
+type Evented {}
+impl Io for Evented {}
+impl AsyncIo for Evented {}
+
+fn before(n: U64) -> U64 { return n + 1 }
+fn earlier(n: U64) -> U64 { return before(n) + 2 }
+
+fn leaf(I: type(Io), io: I, n: U64) -> U64 { return earlier(n) }
+
+fn late(I: type(Io), io: I, n: U64) -> U64 {
+    if n == 5 { return "a".concat("bc").len() }
+    return leaf(io, n)
+}
+
+pub fn main() -> I32 {
+    let io = Evented()
+    return late(io, 2).to_i32_wrapping()
+}
+`,
+	}
+	out := runLowerCompiler(t, exe, files, []string{"std/io.al", "edge.al"})
+	module, err := mir.Parse(string(out))
+	if err != nil {
+		t.Fatalf("parse late step MIR: %v\n%s", err, out)
+	}
+	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+		t.Fatalf("verify late step MIR: %s\n%s", verify.Errors(diagnostics), out)
+	}
+	for _, function := range module.Functions {
+		if !strings.HasPrefix(function.Name, "__alder_step.run.late") {
+			continue
+		}
+		for _, block := range function.Blocks {
+			for _, instr := range block.Instrs {
+				if instr.Op == mir.OpStrConcat {
+					if instr.FailTarget == mir.NoBlock || function.Blocks[instr.FailTarget].Term.Kind != mir.TermPanic {
+						t.Fatalf("cloned str.concat does not target the cloned panic block\n%s", out)
+					}
+					return
+				}
+			}
+		}
+	}
+	t.Fatalf("missing str.concat in the late step\n%s", out)
+}
+
+func runAlderStepSpawnLowerConformance(t *testing.T, exe string) {
+	t.Helper()
+	files := map[string]string{
+		"private.marker": "Map(\n",
+		"std/io.al": `module std.io
+pub trait Io {}
+pub trait BlockingIo {}
+pub trait AsyncIo {}
+`,
+		"std/task.al": `module std.task
+import std.io { AsyncIo, Io }
+pub type Pending(T: type) {}
+pub type Task(T: type) { child: U64 }
+pub type TaskGroup(I: type(Io, AsyncIo)) {
+    capability: I
+    group: U64
+}
+impl(I: type(Io, AsyncIo)) TaskGroup(I) {
+    fn new(io: I) -> TaskGroup(I) { return TaskGroup(capability: io, group: 37) }
+    fn spawn(T: type, mut self, pending: Pending(T)) -> Task(T) { return Task(child: 0) }
+    fn start(mut self, pending: Pending(Unit)) -> Unit { return }
+}
+impl(I: type(Io, AsyncIo)) Cleanup for TaskGroup(I) {
+    fn cleanup(take self) -> Unit { return }
+}
+`,
+		"spawn.al": `import std.io { AsyncIo, Io }
+import std.task { TaskGroup }
+type Evented {}
+impl Io for Evented {}
+impl AsyncIo for Evented {}
+fn counted(first: U64, second: U64) -> U64 { return first - second }
+fn note(n: U64) -> Unit { return }
+fn parent(io: Evented) -> Unit {
+    using tasks = TaskGroup.new(io)
+    let child = tasks.spawn(counted(83, 19))
+    tasks.start(note(57))
+    return
+}
+pub fn main() -> I32 {
+    let io = Evented()
+    parent(io)
+    return 0
+}
+`,
+	}
+	out := runLowerCompiler(t, exe, files, []string{"std/io.al", "std/task.al", "spawn.al"})
+	module, err := mir.Parse(string(out))
+	if err != nil {
+		t.Fatalf("parse spawn MIR: %v\n%s", err, out)
+	}
+	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+		t.Fatalf("verify spawn MIR: %s\n%s", verify.Errors(diagnostics), out)
+	}
+	if module.FormatVersion != mir.TaskFormatVersion {
+		t.Fatalf("spawn MIR version = %d, want %d", module.FormatVersion, mir.TaskFormatVersion)
+	}
+	constants := make(map[string]int64)
+	for _, constant := range module.Constants {
+		if constant.Value.Kind == mir.ConstInt {
+			constants[constant.Name] = constant.Value.Int
+		}
+	}
+	var targets []string
+	for _, function := range module.Functions {
+		for _, block := range function.Blocks {
+			for i, instr := range block.Instrs {
+				if instr.Op == mir.OpTaskSpawn {
+					if !strings.HasPrefix(function.Name, "__alder_step.run.parent") {
+						t.Fatalf("task.spawn emitted outside parent step: %s", function.Name)
+					}
+					target := module.Functions[instr.Callee].Name
+					targets = append(targets, target)
+					want := []int64{57}
+					if strings.HasPrefix(target, "__alder_step.run.counted") {
+						want = []int64{83, 19}
+					}
+					initialized := make(map[string]mir.Instr)
+					for _, prior := range block.Instrs[:i] {
+						if prior.Op == mir.OpStore && prior.Place.Kind == mir.PlaceField && prior.Place.Base.Kind == mir.PlaceDeref && prior.Place.Base.Deref == instr.B {
+							def := function.Values[prior.StoreVal].Def
+							initialized[prior.Place.Field] = function.Blocks[def.Block].Instrs[def.Instr]
+						}
+					}
+					if entry := initialized["state"]; entry.Op != mir.OpEnumConstruct || entry.Variant != "entry" {
+						t.Fatalf("child %s was not initialized to entry before spawn", target)
+					}
+					for j, value := range want {
+						field := "p" + strconv.Itoa(j)
+						got := initialized[field]
+						if got.Op != mir.OpConstGet || constants[got.Const] != value {
+							t.Fatalf("child %s field %s did not receive %d before spawn", target, field, value)
+						}
+					}
+				}
+			}
+		}
+	}
+	if len(targets) != 2 || !strings.HasPrefix(targets[0], "__alder_step.run.counted") || !strings.HasPrefix(targets[1], "__alder_step.run.note") {
+		t.Fatalf("expected inline spawn and start, got %v\n%s", targets, out)
+	}
 }
 
 func runAlderRecursiveStepLowerConformance(t *testing.T, exe string) {

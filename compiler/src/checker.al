@@ -7060,11 +7060,9 @@ fn infer_call_arguments(d: Domain, state: State, parse: ParseStore, base: CheckS
             let failed = try fail_call_inference(d, state, concrete.store, 57, arg)
             return Ok(CallInferenceBad(failed))
         }
-        // The argument node now names the placeholder Pending value rather
-        // than the checked child call: lowering constructs the empty
-        // declaration-only type and never evaluates the child body, while the
-        // call's instances and its argument checks stay in the store.
-        __s0_buffer_set(CheckedExprRec, concrete.store.expressions, draft.expression - 1, CheckedExprRec(owner: inner.owner, owner_previous: inner.owner_previous, syntax: inner.syntax, kind: 23, checked_type: concrete.checked_type, parameter_use: 0, bool_value: 0, left: 0, right: 0, annotation: 0, first_child: 0, child_count: 0, operator: 0, site_kind: inner.site_kind, site_syntax: inner.site_syntax, field_move: 0))
+        let callee = __s0_buffer_get(CallAnnotationRec, concrete.store.call_annotations, inner.annotation - 1)
+        __s0_buffer_set(CallAnnotationRec, concrete.store.call_annotations, inner.annotation - 1, CallAnnotationRec(owner: owner, kind: 9, target: callee.target, checked_type: concrete.checked_type, variant_use: 0, builtin: 0, place: callee.place, suspends: 0))
+        __s0_buffer_set(CheckedExprRec, concrete.store.expressions, draft.expression - 1, CheckedExprRec(owner: inner.owner, owner_previous: inner.owner_previous, syntax: inner.syntax, kind: checked_expr_pending(), checked_type: concrete.checked_type, parameter_use: 0, bool_value: 0, left: 0, right: 0, annotation: inner.annotation, first_child: inner.first_child, child_count: inner.child_count, operator: 0, site_kind: inner.site_kind, site_syntax: inner.site_syntax, field_move: 0))
         return infer_call_arguments(d, state, parse, base, concrete.store, owner, call, target, runtime_start, receiver_at, ordinal + 1, count, parameter_start, inferred, in_loop)
     }
     if !pattern_bound(store, pattern, bindings) {

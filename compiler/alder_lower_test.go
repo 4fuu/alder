@@ -27,6 +27,8 @@ func runLowerConformance(t *testing.T, exe string) {
 	t.Run("m75-fn-values", func(t *testing.T) { runAlderFnValueLowerBehavior(t, exe) })
 	t.Run("m75-closures", func(t *testing.T) { runAlderClosureLowerBehavior(t, exe) })
 	t.Run("m9-step-split", func(t *testing.T) { runAlderStepSplitLowerConformance(t, exe) })
+	t.Run("m9-step-failure-edge", func(t *testing.T) { runAlderStepFailureEdgeConformance(t, exe) })
+	t.Run("m9-step-spawn", func(t *testing.T) { runAlderStepSpawnLowerConformance(t, exe) })
 	t.Run("m9-step-recursive", func(t *testing.T) { runAlderRecursiveStepLowerConformance(t, exe) })
 	t.Run("m9-step-many", func(t *testing.T) { runAlderStepManyLowerConformance(t, exe) })
 	t.Run("m9-step-branch", func(t *testing.T) { runAlderStepBranchLowerConformance(t, exe) })

@@ -1456,6 +1456,9 @@ fn run_cases(d: Domain, initial: MirStore) -> Result(Bool, __s0_Error) {
     if !emit_verification(215, try mir_verify_module(d, try frame_cursor_fixture(d, try mir_store_new(d), 1), 6)) { return Ok(false) }
     if !emit_verification(216, try mir_verify_module(d, try frame_cursor_fixture(d, try mir_store_new(d), 2), 6)) { return Ok(false) }
     if !emit_verification(217, try mir_verify_module(d, try frame_cursor_fixture(d, try mir_store_new(d), 3), 6)) { return Ok(false) }
+    if !emit_verification(218, try mir_verify_module(d, try frame_cursor_fixture(d, try mir_store_new(d), 4), 6)) { return Ok(false) }
+    if !emit_verification(219, try mir_verify_module(d, try frame_cursor_fixture(d, try mir_store_new(d), 5), 7)) { return Ok(false) }
+    if !emit_verification(220, try mir_verify_module(d, try frame_cursor_fixture(d, try mir_store_new(d), 6), 7)) { return Ok(false) }
     return Ok(true)
 }
 
@@ -1672,8 +1675,9 @@ fn frame_fixture(d: Domain, initial: MirStore, mode: U64) -> Result(MirStore, __
 
 
 // frame_cursor_fixture builds a suspending cleanup cursor whose frame-resident
-// scope is anchored in s0. Mode 0 parks, mode 1 hands off a call with x0/y0,
-// and mode 2 re-enters the scope through unsaved s1.
+// scope is anchored in s0. Mode 0 parks; 1 hands off a call with x0/y0;
+// 2 re-enters through unsaved s1; 3 repeats stores in the save list;
+// 4 repeats a resume load; 5 spawns without x0/y0; 6 omits that spawn.
 fn frame_cursor_fixture(d: Domain, initial: MirStore, mode: U64) -> Result(MirStore, __s0_Error) {
     let empty = try __s0_buffer_new(U64, d)
     let handle = try mir_intern_type(d, initial, mir_type_kind_domain_handle(), 0, 0, 0, empty, 0)
@@ -1855,7 +1859,7 @@ fn frame_cursor_fixture(d: Domain, initial: MirStore, mode: U64) -> Result(MirSt
     var setup_ord: U64 = 1
     var child_value: U64 = 0
     var child_domain_value: U64 = 0
-    if mode == 1 {
+    if mode == 1 || mode == 5 || mode == 6 {
         let one = try mir_add_value(d, store, step.id, "one", mir_type_u64(), mir_value_def_instruction(), bb_setup.id, setup_ord + 1)
         store = one.store
         store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_setup.id, ordinal: setup_ord, op: mir_op_const_get(), result: one.id, place: 0, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: one_rec.name_start, name_end: one_rec.name_end))).store
@@ -1870,6 +1874,23 @@ fn frame_cursor_fixture(d: Domain, initial: MirStore, mode: U64) -> Result(MirSt
         setup_ord = setup_ord + 1
         child_value = child.id
         child_domain_value = child_domain.id
+        if mode != 1 {
+            let child_deref = try mir_add_place(d, store, MirPlaceRec(function: step.id, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: child.id))
+            let child_seed = try mir_add_place(d, child_deref.store, MirPlaceRec(function: step.id, kind: mir_place_field(), local: 0, base: child_deref.id, field_start: leaf_p0_name.start, field_end: leaf_p0_name.end, deref_value: 0))
+            let child_state = try mir_add_place(d, child_seed.store, MirPlaceRec(function: step.id, kind: mir_place_field(), local: 0, base: child_deref.id, field_start: leaf_state_name.start, field_end: leaf_state_name.end, deref_value: 0))
+            store = (try mir_add_instruction(d, child_state.store, MirInstrRec(function: step.id, block: bb_setup.id, ordinal: setup_ord, op: mir_op_store(), result: 0, place: child_seed.id, type_op: 0, a: p0.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+            setup_ord = setup_ord + 1
+            let child_entry = try mir_add_value(d, store, step.id, "child_entry", leaf_state.type_id, mir_value_def_instruction(), bb_setup.id, setup_ord + 1)
+            store = (try mir_add_instruction(d, child_entry.store, MirInstrRec(function: step.id, block: bb_setup.id, ordinal: setup_ord, op: mir_op_enum_construct(), result: child_entry.id, place: 0, type_op: leaf_state.type_id, a: 0, b: 0, c: 0, target: 0, name_start: leaf_entry_name.start, name_end: leaf_entry_name.end))).store
+            setup_ord = setup_ord + 1
+            store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_setup.id, ordinal: setup_ord, op: mir_op_store(), result: 0, place: child_state.id, type_op: 0, a: child_entry.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+            setup_ord = setup_ord + 1
+            if mode == 5 {
+                let task = try mir_add_value(d, store, step.id, "task", mir_type_u64(), mir_value_def_instruction(), bb_setup.id, setup_ord + 1)
+                store = (try mir_add_instruction(d, task.store, MirInstrRec(function: step.id, block: bb_setup.id, ordinal: setup_ord, op: mir_op_task_spawn(), result: task.id, place: 0, type_op: 0, a: one.id, b: child.id, c: child_domain.id, target: leaf_step.id, name_start: 0, name_end: 0))).store
+                setup_ord = setup_ord + 1
+            }
+        }
     }
     let cleanup_state = try mir_add_value(d, store, step.id, "cleanup_state", state.type_id, mir_value_def_instruction(), bb_setup.id, setup_ord + 1)
     store = cleanup_state.store
@@ -1939,6 +1960,11 @@ fn frame_cursor_fixture(d: Domain, initial: MirStore, mode: U64) -> Result(MirSt
     store = s0_value.store
     store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_after.id, ordinal: after_ord, op: mir_op_load(), result: s0_value.id, place: s0_place.id, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
     after_ord = after_ord + 1
+    if mode == 4 {
+        let duplicate = try mir_add_value(d, store, step.id, "duplicate_scope_load", cleanup_scope_type.type_id, mir_value_def_instruction(), bb_after.id, after_ord + 1)
+        store = (try mir_add_instruction(d, duplicate.store, MirInstrRec(function: step.id, block: bb_after.id, ordinal: after_ord, op: mir_op_load(), result: duplicate.id, place: s0_place.id, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+        after_ord = after_ord + 1
+    }
     let resume_scope = try mir_add_value(d, store, step.id, "resume_scope", cleanup_scope_type.type_id, mir_value_def_instruction(), bb_after.id, after_ord + 1)
     store = resume_scope.store
     store = (try mir_add_instruction(d, store, MirInstrRec(function: step.id, block: bb_after.id, ordinal: after_ord, op: mir_op_cleanup_scope_begin(), result: resume_scope.id, place: 0, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
@@ -2008,6 +2034,8 @@ func runMIRVerifierConformance(t *testing.T, exe string) {
 	want += "E 91 1 5\nC 92 1 0 0 0\nD 1 5 1 0 0 0 0 0 2 0 0 1\nC 97 1 0 0 0\nD 10 74 1 1 1 0 0 13 0 0 10 13\nC 98 1 0 0 0\nD 10 74 1 1 1 0 0 18 0 0 10 18\nC 93 0 1 0 0\nC 100 0 1 0 0\nC 101 1 0 0 0\nD 5 41 2 1 1 0 0 15 0 0 15 2\nC 102 1 0 0 0\nD 5 41 2 1 2 0 0 10 0 0 10 3\nC 103 1 0 0 0\nD 5 41 2 1 5 0 0 2 0 0 2 6\nC 104 1 0 0 0\nD 5 41 2 1 5 0 0 2 0 0 2 6\nC 105 0 1 0 0\nC 106 1 0 0 0\nD 5 41 2 1 1 0 0 14 0 0 14 2\nC 107 1 0 0 0\nD 1 11 2 1 1 0 0 0 1 2147483647 0 0\nC 108 1 0 0 0\nD 1 11 2 1 2 0 0 0 2 2147483647 0 0\nV 109 2\nD 6 52 2 1 0 2 0 0 0 0 0 8\nD 6 53 2 1 0 2 0 0 0 0 0 8\nC 110 0 1 0 0\nC 111 0 1 0 0\nC 113 2 0 0 0\nD 6 52 2 1 0 2 0 0 0 0 0 8\nD 6 53 2 1 0 2 0 0 0 0 0 8\n"
 	want += "V 112 1\nD 8 66 1 1 3 0 0 0 0 0 0 5\n"
 	want += "V 200 0\nV 201 5\nD 2 21 2 0 0 0 0 0 2 0 0 2\nD 2 76 2 0 0 0 0 0 2 0 0 0\nD 2 80 0 0 0 0 0 16 16 0 0 0\nD 2 77 0 0 0 0 0 14 14 0 0 0\nD 2 89 2 0 0 0 0 17 2 0 0 0\nV 202 1\nD 2 77 0 0 0 0 0 14 14 0 0 0\nV 203 1\nD 2 78 0 0 0 0 0 15 15 0 0 0\nV 204 1\nD 2 79 0 0 0 0 0 16 16 0 0 0\nV 205 1\nD 2 80 0 0 0 0 0 19 19 0 0 0\nV 206 1\nD 2 89 2 0 0 0 0 17 1 0 0 0\nV 207 1\nD 6 94 2 3 0 4 0 0 2 0 0 1\nV 208 1\nD 6 96 2 5 0 6 0 0 2 0 0 0\nV 209 1\nD 6 97 2 6 0 7 0 0 2 0 0 0\nV 210 1\nD 6 90 2 1 0 0 0 0 2 0 0 0\nV 211 2\nD 5 44 2 5 10 0 0 1 0 0 1 1\nD 5 86 2 5 10 0 0 0 0 0 0 0\nV 212 1\nD 5 87 2 5 10 0 3 0 8 0 0 0\nV 213 1\nD 6 91 2 8 14 0 0 0 2 0 0 2\nV 214 0\nV 215 0\nV 216 1\nD 7 102 3 4 0 0 0 0 3 0 0 2\nV 217 0\n"
+
+	want += "V 218 1\nD 6 93 3 4 0 0 0 0 3 0 0 2\nV 219 0\nV 220 1\nD 6 85 3 3 12 0 0 19 3 0 0 9\n"
 
 	var baseline string
 	for i := 0; i < 3; i++ {

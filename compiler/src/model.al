@@ -326,6 +326,8 @@ type CheckedExprChildRec {
 // method receiver, has a suspending capability type parameter or value; the
 // fact is recorded for later lowering and is not manifest output. It never
 // depends on how a generic callee was instantiated.
+// A Pending call (kind 9) keeps its resolved target and its expression's
+// ordered children without evaluating the call.
 type CallAnnotationRec {
     owner: U64
     kind: U64
@@ -343,6 +345,8 @@ type CheckedReturnRec {
     expression: U64
     result_use: U64
 }
+
+fn checked_expr_pending() -> U64 { return 41 }
 
 // Checked control records are the lowering-facing source model. Blocks retain
 // their persistent entry environment and a reverse source-order statement
