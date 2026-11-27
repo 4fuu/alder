@@ -338,6 +338,11 @@ by the backend exactly like `alder_domain_alloc` and `alder_cleanup_run`.
   entry does not read `out`. The root activation is a task like any other;
   the runtime has no task-less root activation. A synchronous `main` keeps
   the existing direct entry.
+- A suspending instance emits only its step function and thunk; no direct
+  callable body is emitted for it, so a park marker never reaches generated
+  C as a call. Nothing legitimate references a direct twin: function values
+  and closure bodies cannot suspend, suspending cleanup hooks use step
+  drivers, and a suspending hosted `main` uses the async entry above.
 
 ### Task runtime ABI
 
