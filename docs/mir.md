@@ -1228,7 +1228,10 @@ meaning of any existing MIR 6 module:
   or `cleanup<j>` teardown state lexically inside the scope all belong to that
   one dynamic scope. `cleanup<j>` states re-adopt the scopes they are inside
   exactly like resume states, in outer-to-inner order. `s<i>` participates in
-  the state-indexed save/load equality like every other saved field;
+  the state-indexed save/load equality like every other saved field; the
+  equality is over ordered field sets, so a field stored more than once in
+  one suspend block (the begin's own store plus the save-list store) counts
+  once in that block's save set;
 - the frame is the activation's stable storage across states. A frame field
   of a capability or handle kind may be carried across a state as a local
   place, subject to the state-indexed store/load equality above and to the
