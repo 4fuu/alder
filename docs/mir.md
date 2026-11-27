@@ -1626,7 +1626,13 @@ keeps the values live, and the lowering never allocates, resets, or destroys a
 spawned activation domain from the spawner while the task is live. A
 test-build domain check reports a violation of that contract. `task.spawn` is needed
 because the handoff passes `safe_mut` and `domain_handle` values that no
-verified C binding can name. `await`, `release`, `cancel`, `yield`, sleep,
+verified C binding can name. For each `Pending(T)` argument the checker
+preserves the checked callee's resolved `FunctionId` and the ordered argument
+expression links in the call annotation, while the argument's checked
+expression remains the declaration-only `Pending` placeholder so the parent
+never evaluates the child body. Lowering consumes the preserved callee and
+argument links to construct the child frame and emit `task.spawn`; the
+placeholder semantics and the task-transfer rules are unchanged. `await`, `release`, `cancel`, `yield`, sleep,
 channel, and shield operations are ordinary bindings over C scalar values and
 task ids and add no MIR operation. `task.spawn` lands through the versioning
 process with the `Pending(T)` typing surface in gate 9.4; gate 9.2 exercises
