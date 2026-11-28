@@ -2,6 +2,8 @@ package compiler
 
 import (
 	"bytes"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -163,6 +165,76 @@ pub fn main() -> I32 {
 		}
 	}
 	t.Fatalf("missing str.concat in the late step\n%s", out)
+}
+
+func TestAlderStepSharedPanic(t *testing.T) {
+	t.Parallel()
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, cc, root)
+	files := map[string]string{
+		"shared-panic.al": `import c "fixture_timer.h" as rt {
+    raw fn park = "alder_task_park"() -> Unit
+}
+
+fn wait(n: U64) -> U64 {
+    unsafe c { rt.park() }
+    return n
+}
+
+pub fn main() -> I32 {
+    let label = "".concat("a")
+    let index = wait(label.len())
+    var bytes: Array(U8, 3) = [1, 5, 7]
+    let length = bytes.slice_mut(0, index).len()
+    let n = wait(length)
+    return (n + bytes[index].to_u64()).to_i32_wrapping()
+}
+`,
+	}
+	result := runProductionCompiler(t, exe, files, "compile", "--emit=mir", "shared-panic.al")
+	if result.status != 0 {
+		t.Fatalf("emit shared panic MIR: status %d\n%s", result.status, result.stderr)
+	}
+	out := result.stdout
+	module, err := mir.Parse(out)
+	if err != nil {
+		t.Fatalf("parse shared panic MIR: %v\n%s", err, out)
+	}
+	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+		t.Fatalf("verify shared panic MIR: %s\n%s", verify.Errors(diagnostics), out)
+	}
+	for _, function := range module.Functions {
+		if function.Name != "__alder_step.run.main" {
+			continue
+		}
+		for _, panicBlock := range function.Blocks {
+			if panicBlock.Term.Kind != mir.TermPanic || len(panicBlock.Params) != 1 {
+				continue
+			}
+			seen := map[mir.OpKind]mir.ValueId{}
+			for _, block := range function.Blocks {
+				for _, instr := range block.Instrs {
+					if instr.FailTarget != mir.NoBlock && function.Blocks[instr.FailTarget] == panicBlock && len(instr.FailArgs) == 1 {
+						seen[instr.Op] = instr.FailArgs[0]
+					}
+				}
+			}
+			slice, hasSlice := seen[mir.OpSliceRangeChecked]
+			index, hasIndex := seen[mir.OpArrayIndexChecked]
+			add, hasAdd := seen[mir.OpIntAddChecked]
+			if hasSlice && hasIndex && hasAdd && slice != index && add == index {
+				return
+			}
+		}
+	}
+	t.Fatalf("no shared panic with distinct edge domain arguments\n%s", out)
 }
 
 func runAlderStepSpawnLowerConformance(t *testing.T, exe string) {

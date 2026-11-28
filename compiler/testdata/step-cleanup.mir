@@ -452,7 +452,7 @@ bb_suspend_1:
   store field(deref %frame, y1), %__alder_step_v112
   %__alder_step_v116 = load local %held
   store field(deref %frame, l0), %__alder_step_v116
-  store field(deref %frame, s0), %__alder_step_v89
+  store field(deref %frame, s0), %__alder_step_v97
   %__alder_step_v117 = enum.construct @__alder_step.status, call
   return %__alder_step_v117
 

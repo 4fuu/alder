@@ -2,7 +2,7 @@ package verify
 
 import (
 	"fmt"
-	"strings"
+	"slices"
 
 	"github.com/4fuu/alder/mir"
 )
@@ -605,40 +605,15 @@ func frameStatusFlow(m *mir.Module, inv *frameInventory, step *frameStepInfo, sa
 				errs = append(errs, Error{Loc: loc, Msg: "done requires out to be initialized on every path"})
 			}
 		case "call", "park":
-			name := ""
-			if flow.variant >= 0 {
-				name = step.variants[flow.variant].Name
-			}
-			kind, index, ok := frameStateKind(name)
-			if !ok {
+			if flow.variant <= 0 || flow.variant >= len(step.variants) {
 				errs = append(errs, Error{Loc: loc, Msg: fmt.Sprintf("%s requires a resume or cleanup state on every path", status)})
 				continue
 			}
-			if kind == "resume" {
-				hasPair := index >= 0 && index < len(info.callPoint) && info.callPoint[index]
-				if status == "call" {
-					if !hasPair {
-						errs = append(errs, Error{Loc: loc, Msg: fmt.Sprintf("call requires a call-type resume state with matching x%d and y%d", index, index)})
-						continue
-					}
-					if !frameHasFields(save[name], "x"+frameNumber(index), "y"+frameNumber(index)) {
-						errs = append(errs, Error{Loc: loc, Msg: fmt.Sprintf("call requires the suspend block to save x%d and y%d", index, index)})
-					}
-				} else if hasPair {
-					errs = append(errs, Error{Loc: loc, Msg: fmt.Sprintf("park requires a resume state without x%d and y%d", index, index)})
-				}
-				break
-			}
-			// A cleanup<j> state is the suspension point of a suspending
-			// cleanup entry. Its x<i>/y<i> index is the suspension point, not
-			// j, so the saved pair identifies the call handoff.
-			pairs := frameSavedCalleePairs(info, save[name])
-			if status == "call" {
-				if len(pairs) == 0 {
-					errs = append(errs, Error{Loc: loc, Msg: "call requires a cleanup state with matching saved x<i> and y<i>"})
-				}
-			} else if len(pairs) != 0 {
-				errs = append(errs, Error{Loc: loc, Msg: "park requires a cleanup state without saved x<i> and y<i>"})
+			pair := frameSavesCalleePair(info, save[step.variants[flow.variant].Name])
+			if status == "call" && !pair {
+				errs = append(errs, Error{Loc: loc, Msg: "call requires the suspend block to save a matching x<i>/y<i> pair"})
+			} else if status == "park" && pair {
+				errs = append(errs, Error{Loc: loc, Msg: "park requires a suspend block without a saved x<i>/y<i> pair"})
 			}
 		case "cancelled":
 			if flow.mayOut {
@@ -667,55 +642,13 @@ func framePropagate(in []frameFlow, seeded []bool, f *mir.Function, target mir.B
 	}
 }
 
-func frameStateKind(name string) (string, int, bool) {
-	for _, prefix := range []string{"resume", "cleanup"} {
-		if !strings.HasPrefix(name, prefix) {
-			continue
-		}
-		digits := name[len(prefix):]
-		if digits == "" {
-			return "", -1, false
-		}
-		index := 0
-		for i := 0; i < len(digits); i++ {
-			if digits[i] < '0' || digits[i] > '9' {
-				return "", -1, false
-			}
-			index = index*10 + int(digits[i]-'0')
-		}
-		return prefix, index, true
-	}
-	return "", -1, false
-}
-
-// frameSavedCalleePairs returns the suspension-point indexes whose complete
-// x<i>/y<i> pair is in the state's ordered save list.
-func frameSavedCalleePairs(info *frameInfo, save []string) []int {
-	var pairs []int
-	for i := range info.callPoint {
-		if info.callPoint[i] && frameHasFields(save, "x"+frameNumber(i), "y"+frameNumber(i)) {
-			pairs = append(pairs, i)
+func frameSavesCalleePair(info *frameInfo, save []string) bool {
+	for _, name := range save {
+		if field, ok := info.field(name); ok && field.kind == frameFieldCallee && slices.Contains(save, "y"+name[1:]) {
+			return true
 		}
 	}
-	return pairs
-}
-
-func frameNumber(n int) string { return fmt.Sprintf("%d", n) }
-
-func frameHasFields(fields []string, want ...string) bool {
-	for _, w := range want {
-		found := false
-		for _, f := range fields {
-			if f == w {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return false
-		}
-	}
-	return true
+	return false
 }
 
 // frameTeardownBlocks returns the blocks every path to which crosses a

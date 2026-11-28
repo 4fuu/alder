@@ -2941,18 +2941,6 @@ fn mir_vframe_state_ordinal(store: MirStore, indexes: MirVIndexes, state_type: U
     return 0
 }
 
-fn mir_vframe_resume_index(store: MirStore, indexes: MirVIndexes, state_type: U64, ordinal: U64) -> U64 {
-    if ordinal == 0 { return 0 }
-    let part = __s0_buffer_get(MirTypePartRec, store.type_parts, mir_vframe_variant(store, indexes, state_type, ordinal - 1) - 1)
-    return mir_vframe_indexed(store, part.name_start, part.name_end, "resume")
-}
-
-fn mir_vframe_cleanup_index(store: MirStore, indexes: MirVIndexes, state_type: U64, ordinal: U64) -> U64 {
-    if ordinal == 0 { return 0 }
-    let part = __s0_buffer_get(MirTypePartRec, store.type_parts, mir_vframe_variant(store, indexes, state_type, ordinal - 1) - 1)
-    return mir_vframe_indexed(store, part.name_start, part.name_end, "cleanup")
-}
-
 fn mir_vframe_def_instr(store: MirStore, indexes: MirVIndexes, function: U64, value: U64) -> U64 {
     let vi = mir_vindex_value(indexes, function, value)
     if vi == 0 { return 0 }
@@ -3515,22 +3503,15 @@ fn mir_vframe_phase6(d: Domain, store: MirStore, indexes: MirVIndexes, out0: __s
                         if status == 0 { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), mir_vdiag_frame_status_done(), function, bi, 0, t, 0, 0, function, 0, 0, 0)) } else {
                             if status == 1 { if out_pos == 0 || omust == 0 { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), mir_vdiag_frame_status_done(), function, bi, 0, t, 0, 0, function, 0, 0, 0)) } }
                             if status == 2 || status == 3 {
-                                let idx = mir_vframe_resume_index(store, indexes, step.state_type, st)
-                                let run = __s0_buffer_get(MirVFrameRun, runs, st - 1)
-                                if idx != 0 {
-                                    let has_callee = mir_vframe_field_pos(scan, frame_index, mir_vframe_field_callee(), idx - 1) != 0
-                                    let cpos = mir_vframe_field_pos(scan, frame_index, mir_vframe_field_callee(), idx - 1)
-                                    let ypos = mir_vframe_field_pos(scan, frame_index, mir_vframe_field_callee_owner(), idx - 1)
-                                    let saved = mir_vframe_save_has(run, save_pos, cpos) && mir_vframe_save_has(run, save_pos, ypos)
-                                    if status == 2 { if !has_callee || !saved { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), mir_vdiag_frame_status_call(), function, bi, 0, t, 0, 0, function, 0, 0, idx)) } }
-                                    if status == 3 { if has_callee { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), mir_vdiag_frame_status_park(), function, bi, 0, t, 0, 0, function, 0, 0, idx)) } }
+                                if st <= 1 || st > __s0_buffer_len(MirVFrameRun, runs) {
+                                    var kind = mir_vdiag_frame_status_call()
+                                    if status == 3 { kind = mir_vdiag_frame_status_park() }
+                                    out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), kind, function, bi, 0, t, 0, 0, function, 0, 0, 0))
                                 } else {
-                                    let cidx = mir_vframe_cleanup_index(store, indexes, step.state_type, st)
-                                    if cidx == 0 { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), mir_vdiag_frame_status_call(), function, bi, 0, t, 0, 0, function, 0, 0, 0)) } else {
-                                        let pair = mir_vframe_saved_pair_exists(scan, frame_index, run, save_pos)
-                                        if status == 2 { if !pair { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), mir_vdiag_frame_status_call(), function, bi, 0, t, 0, 0, function, 0, 0, cidx)) } }
-                                        if status == 3 { if pair { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), mir_vdiag_frame_status_park(), function, bi, 0, t, 0, 0, function, 0, 0, cidx)) } }
-                                    }
+                                    let run = __s0_buffer_get(MirVFrameRun, runs, st - 1)
+                                    let pair = mir_vframe_saved_pair_exists(scan, frame_index, run, save_pos)
+                                    if status == 2 && !pair { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), mir_vdiag_frame_status_call(), function, bi, 0, t, 0, 0, function, 0, 0, st)) }
+                                    if status == 3 && pair { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), mir_vdiag_frame_status_park(), function, bi, 0, t, 0, 0, function, 0, 0, st)) }
                                 }
                             }
                             if status == 4 { if omay != 0 || __s0_buffer_get(U64, teardown, bi) == 0 { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_domains(), mir_vdiag_frame_status_cancelled(), function, bi, 0, t, 0, 0, function, 0, 0, 0)) } }

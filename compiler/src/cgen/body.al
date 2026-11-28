@@ -303,6 +303,10 @@ fn cgen_supported(store: MirStore, indexes: MirVIndexes) -> Bool {
     while at < __s0_buffer_len(MirInstrRec, store.instructions) {
         let item = __s0_buffer_get(MirInstrRec, store.instructions, at)
         if item.op > mir_op_slice_to_bytes() { return false }
+        if item.op == mir_op_c_binding_call() {
+            let binding = __s0_buffer_get(MirBindingFnRec, store.binding_funcs, item.target - 1)
+            if mir_vname_word(store, binding.c_name_start, binding.c_name_end, "alder_task_park") && cgen_step_index_for_direct(store, item.function) == 0 { return false }
+        }
         if item.op == mir_op_copy_to_domain() && !cgen_copy_supported(store, cgen_value_type(store, indexes, item.function, item.b)) { return false }
         at = at + 1
     }

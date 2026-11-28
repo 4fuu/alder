@@ -53,8 +53,6 @@ type frameInfo struct {
 	byName    map[string]int
 	stateType mir.TypeId
 	step      *frameStepInfo
-	// callPoint[i] reports whether x<i>/y<i> exist.
-	callPoint []bool
 }
 
 func (f *frameInfo) field(name string) (frameFieldInfo, bool) {
@@ -252,12 +250,6 @@ func buildFrameInventory(m *mir.Module) (*frameInventory, []Error) {
 			info.byName[field.name] = i
 			if field.kind == frameFieldState {
 				info.stateType = field.typeID
-			}
-			if field.kind == frameFieldCallee {
-				for len(info.callPoint) <= field.index {
-					info.callPoint = append(info.callPoint, false)
-				}
-				info.callPoint[field.index] = true
 			}
 		}
 		errs = append(errs, fieldErrs...)

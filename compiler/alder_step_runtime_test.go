@@ -4,8 +4,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/4fuu/alder/mir"
+	"github.com/4fuu/alder/mir/verify"
 )
 
 const alderStepRuntimeStdIO = `module std.io
@@ -48,14 +52,31 @@ static inline unsigned long long fixture_timer_register(unsigned long long deadl
 #endif
 `
 
-func runAlderStepProgram(t *testing.T, exe, cc, root, source, driver string) string {
+func runAlderStepProgram(t *testing.T, exe, cc, root, source, driver string, private, verifyMIR bool) string {
 	t.Helper()
 	files := map[string]string{
 		"std/io.al":       alderStepRuntimeStdIO,
 		"fixture_timer.h": alderStepRuntimeTimerHeader,
 		"program.al":      source,
 	}
-	result := runProductionCompiler(t, exe, files, "compile", "--bootstrap-private", "--emit=c", "std/io.al", "program.al")
+	compile := []string{"compile"}
+	if private {
+		compile = append(compile, "--bootstrap-private")
+	}
+	if verifyMIR {
+		result := runProductionCompiler(t, exe, files, append(compile, "--emit=mir", "std/io.al", "program.al")...)
+		if result.status != 0 {
+			t.Fatalf("emit step MIR: status %d\n%s", result.status, result.stderr)
+		}
+		module, err := mir.Parse(result.stdout)
+		if err != nil {
+			t.Fatalf("parse step MIR: %v\n%s", err, result.stdout)
+		}
+		if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+			t.Fatalf("verify step MIR: %s\n%s", verify.Errors(diagnostics), result.stdout)
+		}
+	}
+	result := runProductionCompiler(t, exe, files, append(compile, "--emit=c", "std/io.al", "program.al")...)
 	if result.status != 0 {
 		t.Fatalf("compile step program: status %d\nstdout:\n%s\nstderr:\n%s", result.status, result.stdout, result.stderr)
 	}
@@ -99,10 +120,12 @@ func TestAlderStepRuntimePrograms(t *testing.T) {
 	_, exe, _ := getSharedProductionBuild(t, cc, root)
 
 	cases := []struct {
-		name   string
-		source string
-		driver string
-		want   string
+		name      string
+		source    string
+		driver    string
+		want      string
+		private   bool
+		verifyMIR bool
 	}{
 		{
 			name: "chain-three-points",
@@ -283,7 +306,8 @@ pub fn main() -> I32 {
 			want: "alder_cleanup_scope_begin_adopting",
 		},
 		{
-			name: "cancelled-cleanup-reverse",
+			name:    "cancelled-cleanup-reverse",
+			private: true,
 			source: `import std.io { AsyncIo, Io }
 
 import c cancel_self: fn() -> Unit
@@ -365,27 +389,14 @@ int main(void) {
 			want: "alder_step___alder_step_run_work",
 		},
 		{
-			name: "park-timer",
-			source: `import std.io { AsyncIo, Io }
-
-import c "fixture_timer.h" as rt {
+			name:      "capability-free-park-timer",
+			verifyMIR: true,
+			source: `import c "fixture_timer.h" as rt {
     raw fn register = "fixture_timer_register"(deadline: c.ULongLong) -> c.ULongLong
     raw fn park = "alder_task_park"() -> Unit
 }
 
-type TestIo {
-}
-
-impl Io for TestIo {
-    fn check_cancel(self) -> Unit {
-        return
-    }
-}
-
-impl AsyncIo for TestIo {
-}
-
-fn wait(I: type(Io), io: I, n: U64) -> U64 {
+fn wait(n: U64) -> U64 {
     let deadline: U64 = n
     let registered = unsafe c { rt.register(deadline.to_c_ulonglong()) }
     if registered.to_u64() != 1 { return 0 }
@@ -394,8 +405,11 @@ fn wait(I: type(Io), io: I, n: U64) -> U64 {
 }
 
 pub fn main() -> I32 {
-    let io = TestIo()
-    let value = wait(io, 40)
+    let first: U64 = 39
+    let registered = unsafe c { rt.register(first.to_c_ulonglong()) }
+    if registered.to_u64() != 1 { return 2 }
+    unsafe c { rt.park() }
+    let value = wait(40)
     if value != 41 { return 1 }
     return 0
 }
@@ -502,12 +516,15 @@ pub fn main() -> I32 {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			generated := runAlderStepProgram(t, exe, cc, root, tc.source, tc.driver)
+			generated := runAlderStepProgram(t, exe, cc, root, tc.source, tc.driver, tc.private, tc.verifyMIR)
 			if !strings.Contains(generated, tc.want) {
 				t.Fatalf("generated C has no step thunk %q:\n%s", tc.want, generated)
 			}
 			if !strings.Contains(generated, "alder_program_entry(void *host_context)") || !strings.Contains(generated, "alder_executor_run(NULL)") {
 				t.Fatalf("generated C has no root-as-task entry:\n%s", generated)
+			}
+			if regexp.MustCompile(`\balder_fn_main_[0-9]+\(`).MatchString(generated) {
+				t.Fatal("generated C contains a direct twin for suspending main")
 			}
 		})
 	}
