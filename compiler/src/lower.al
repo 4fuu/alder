@@ -10199,6 +10199,11 @@ fn lower_task_take_result(d: Domain, source_state: State, spans: __s0_Buffer(Che
     current = copy.state
     let copied = try lower_add_instr(d, current, function, block, mir_op_copy_to_domain(), copy.id, 0, 0, domain, loaded.id, 0, "")
     current = copied.state
+    let cleanup = lower_release_lookup(current, lower_checked_expression_root(store, offset_id))
+    if cleanup != 0 {
+        let disarmed = try lower_add_instr(d, current, function, block, mir_op_cleanup_disarm(), 0, 0, 0, cleanup, 0, 0, "")
+        current = disarmed.state
+    }
     let released = try lower_task_binding_call(d, current, function, block, "task_release_awaited", "task_release_awaited", mir_type_unit(), try __s0_buffer_new(U64, d))
     current = released.state
     if !current.valid { return Ok(LowerStep(state: current, id: 0)) }

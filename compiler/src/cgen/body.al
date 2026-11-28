@@ -87,15 +87,18 @@ fn cgen_term(store: MirStore, indexes: MirVIndexes, function: U64, block: U64) -
     return MirBuildStep(store: store, id: mir_vindex_term(indexes, function, block))
 }
 
-fn cgen_put_step_slot(d: Domain, writer: CgenWriter, store: MirStore, indexes: MirVIndexes, function: U64, instruction: U64, scope: Bool) -> Result(CgenWriter, __s0_Error) {
-    let step = cgen_step_index_for_function(store, function)
+fn cgen_put_step_member_base(d: Domain, writer: CgenWriter, store: MirStore, indexes: MirVIndexes, function: U64, step: U64) -> Result(CgenWriter, __s0_Error) {
     let rec = __s0_buffer_get(MirStepRec, store.steps, step - 1)
     let frame_param = cgen_function_param(store, indexes, function, 1)
     var out = try cgen_put(d, writer, "(*(( ")
     out = try cgen_put_type(d, out, store, rec.frame)
     out = try cgen_put(d, out, " *)")
     out = try cgen_put_value_read(d, out, store, indexes, function, frame_param.value)
-    out = try cgen_put(d, out, ".data)).")
+    return cgen_put(d, out, ".data)).")
+}
+
+fn cgen_put_step_slot(d: Domain, writer: CgenWriter, store: MirStore, indexes: MirVIndexes, function: U64, instruction: U64, scope: Bool) -> Result(CgenWriter, __s0_Error) {
+    var out = try cgen_put_step_member_base(d, writer, store, indexes, function, cgen_step_index_for_function(store, function))
     if scope { out = try cgen_put(d, out, "alder_scope_") } else { out = try cgen_put(d, out, "alder_domain_") }
     return cgen_put_u64(d, out, instruction)
 }
@@ -182,7 +185,13 @@ fn cgen_field_ordinal(store: MirStore, indexes: MirVIndexes, owner: U64, start: 
 
 fn cgen_put_place(d: Domain, writer: CgenWriter, store: MirStore, indexes: MirVIndexes, function: U64, place: U64) -> Result(CgenWriter, __s0_Error) {
     let item = __s0_buffer_get(MirPlaceRec, store.places, place - 1)
-    if item.kind == mir_place_local() { return cgen_put_local(d, writer, item.local) }
+    if item.kind == mir_place_local() {
+        let step = cgen_step_index_for_function(store, function)
+        if step != 0 && cgen_step_borrows_local(store, function, item.local) {
+            return cgen_put_local(d, try cgen_put_step_member_base(d, writer, store, indexes, function, step), item.local)
+        }
+        return cgen_put_local(d, writer, item.local)
+    }
     if item.kind == mir_place_field() {
         let base_type = cgen_place_type(store, indexes, function, item.base)
         let base_rec = __s0_buffer_get(MirTypeRec, store.types, base_type - 1)
@@ -1869,6 +1878,21 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
             out = try cgen_put_value(d, out, item.result)
             return cgen_put(d, out, ")) \{ alder_runtime_panic(\"cleanup.push failed\"); }\n")
         }
+        let step = cgen_step_index_for_function(store, item.function)
+        if step != 0 {
+            let owner = cgen_function_param(store, indexes, item.function, 2)
+            out = try cgen_put(d, out, "  alder_ctx_")
+            out = try cgen_put_u64(d, out, instruction - 1)
+            out = try cgen_put(d, out, " = alder_domain_alloc(")
+            out = try cgen_put_value_read(d, out, store, indexes, item.function, owner.value)
+            out = try cgen_put(d, out, ", sizeof(AlderCtx_")
+            out = try cgen_put_u64(d, out, instruction - 1)
+            out = try cgen_put(d, out, "), _Alignof(AlderCtx_")
+            out = try cgen_put_u64(d, out, instruction - 1)
+            out = try cgen_put(d, out, "));\n  if (alder_ctx_")
+            out = try cgen_put_u64(d, out, instruction - 1)
+            out = try cgen_put(d, out, " == NULL) \{ alder_runtime_panic(\"cleanup context allocation failed\"); }\n")
+        }
         let count = cgen_operand_count(store, indexes, mir_operand_instruction(), instruction, 0)
         var ordinal: U64 = 0
         var field: U64 = 0
@@ -1878,7 +1902,7 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
             if parameter.param_type != mir_type_unit() {
                 out = try cgen_put(d, out, "  alder_ctx_")
                 out = try cgen_put_u64(d, out, instruction - 1)
-                out = try cgen_put(d, out, ".alder_f")
+                if step != 0 { out = try cgen_put(d, out, "->alder_f") } else { out = try cgen_put(d, out, ".alder_f") }
                 out = try cgen_put_u64(d, out, field)
                 out = try cgen_put(d, out, " = ")
                 if item.place != 0 && field + 1 == cgen_cleanup_owner_field(store, indexes, item, instruction) {
@@ -1896,7 +1920,7 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
         out = try cgen_put_cleanup_scope_read(d, out, store, indexes, item.function, item.a)
         out = try cgen_put(d, out, ", alder_cleanup_")
         out = try cgen_put_u64(d, out, instruction - 1)
-        out = try cgen_put(d, out, ", &alder_ctx_")
+        if step != 0 { out = try cgen_put(d, out, ", alder_ctx_") } else { out = try cgen_put(d, out, ", &alder_ctx_") }
         out = try cgen_put_u64(d, out, instruction - 1)
         out = try cgen_put(d, out, ", &")
         out = try cgen_put_value(d, out, item.result)
@@ -2954,9 +2978,10 @@ fn cgen_emit_function_body(d: Domain, initial: CgenWriter, store: MirStore, inde
         if instruction.function == function && instruction.op == mir_op_cleanup_push() && (cgen_step_index_for_direct(store, instruction.target) == 0 || instruction.place == 0) && !cgen_cleanup_direct_owner(store, indexes, instruction, at + 1) {
             out = try cgen_put(d, out, "  AlderCtx_")
             out = try cgen_put_u64(d, out, at)
-            out = try cgen_put(d, out, " alder_ctx_")
+            let suspended = cgen_step_index_for_function(store, function) != 0 && cgen_step_index_for_direct(store, instruction.target) == 0
+            if suspended { out = try cgen_put(d, out, " *alder_ctx_") } else { out = try cgen_put(d, out, " alder_ctx_") }
             out = try cgen_put_u64(d, out, at)
-            out = try cgen_put(d, out, " = \{0};\n")
+            if suspended { out = try cgen_put(d, out, ";\n") } else { out = try cgen_put(d, out, " = \{0};\n") }
         }
         at = at + 1
     }
@@ -2975,7 +3000,7 @@ fn cgen_emit_function_body(d: Domain, initial: CgenWriter, store: MirStore, inde
     at = 0
     while at < __s0_buffer_len(MirLocalRec, store.locals) {
         let local = __s0_buffer_get(MirLocalRec, store.locals, at)
-        if local.function == function {
+        if local.function == function && (cgen_step_index_for_function(store, function) == 0 || !cgen_step_borrows_local(store, function, local.ordinal + 1)) {
             out = try cgen_put(d, out, "  ALDER_MAYBE_UNUSED ")
             out = try cgen_put_type(d, out, store, local.local_type)
             out = try cgen_put(d, out, " ")

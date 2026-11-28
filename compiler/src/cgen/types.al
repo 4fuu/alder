@@ -109,6 +109,24 @@ fn cgen_step_index_for_function(store: MirStore, function: U64) -> U64 {
     return 0
 }
 
+// A borrow passed to a child step may outlive the parent step's C stack.
+fn cgen_step_borrows_local(store: MirStore, function: U64, local: U64) -> Bool {
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirInstrRec, store.instructions) {
+        let item = __s0_buffer_get(MirInstrRec, store.instructions, at)
+        if item.function == function && (item.op == mir_op_borrow() || item.op == mir_op_borrow_mut()) {
+            var id = item.place
+            while id != 0 {
+                let place = __s0_buffer_get(MirPlaceRec, store.places, id - 1)
+                if place.kind == mir_place_local() && place.local == local { return true }
+                id = place.base
+            }
+        }
+        at = at + 1
+    }
+    return false
+}
+
 fn cgen_step_index_for_owner(store: MirStore, owner: U64) -> U64 {
     var at: U64 = 0
     while at < __s0_buffer_len(MirStepRec, store.steps) {
@@ -230,6 +248,16 @@ fn cgen_emit_type(d: Domain, initial: CgenTypeState, store: MirStore, id: U64) -
         state = try cgen_emit_type(d, state, store, t.result_type)
         if mir_type_part_count(store, id, mir_type_part_function_env()) != 0 { state = try cgen_emit_type(d, state, store, cgen_type_part(store, id, mir_type_part_function_env(), 0).part_type) }
     }
+    let step = cgen_step_index_for_frame(store, id)
+    if step != 0 {
+        let function = __s0_buffer_get(MirStepRec, store.steps, step - 1).function
+        var at: U64 = 0
+        while at < __s0_buffer_len(MirLocalRec, store.locals) {
+            let local = __s0_buffer_get(MirLocalRec, store.locals, at)
+            if local.function == function && cgen_step_borrows_local(store, function, local.ordinal + 1) { state = try cgen_emit_type(d, state, store, local.local_type) }
+            at = at + 1
+        }
+    }
     var writer = state.writer
     if t.kind == mir_type_kind_aggregate() || t.kind == mir_type_kind_enum() || t.kind == mir_type_kind_option() || t.kind == mir_type_kind_result() || t.kind == mir_type_kind_array() { writer = try cgen_emit_struct(d, writer, store, id, t) }
     if t.kind == mir_type_kind_function() { writer = try cgen_emit_function_type(d, writer, store, id, t) }
@@ -305,6 +333,18 @@ fn cgen_emit_struct(d: Domain, initial: CgenWriter, store: MirStore, id: U64, t:
         let step = cgen_step_index_for_frame(store, id)
         if step != 0 {
             let step_rec = __s0_buffer_get(MirStepRec, store.steps, step - 1)
+            var at: U64 = 0
+            while at < __s0_buffer_len(MirLocalRec, store.locals) {
+                let local = __s0_buffer_get(MirLocalRec, store.locals, at)
+                if local.function == step_rec.function && cgen_step_borrows_local(store, local.function, local.ordinal + 1) {
+                    out = try cgen_put(d, out, "  ")
+                    out = try cgen_put_type(d, out, store, local.local_type)
+                    out = try cgen_put(d, out, " ")
+                    out = try cgen_put_local(d, out, local.ordinal + 1)
+                    out = try cgen_put(d, out, ";\n")
+                }
+                at = at + 1
+            }
             var site: U64 = 0
             while site < step_rec.domain_count {
                 out = try cgen_put(d, out, "  AlderDomain alder_domain_")

@@ -613,6 +613,52 @@ static inline void fixture_observe(int value) {
 		}
 	})
 
+	t.Run("spawn-argument-through-suspending-write", func(t *testing.T) {
+		files := map[string]string{"alder.toml": taskManifest, "src/main.al": `module hello.main
+import std.io { Io }
+import std.task { TaskGroup, yield }
+import std.test { SimIo }
+
+fn child(io: SimIo, tag: U8) -> Unit {
+    let _ = io.write_stdout([tag])
+}
+
+pub fn main() -> I32 {
+    let sim = SimIo.new()
+    using tasks = TaskGroup.new(sim)
+    tasks.start(child(sim, 65))
+    yield(sim)
+    return 0
+}
+`}
+		got := runProductionCompilerEnv(t, exe, t.TempDir(), env, files, "run")
+		if got.status != 0 || got.stdout != "A" || got.stderr != "" {
+			t.Fatalf("spawned child wrote %q, status %d, stderr %q; want A and status 0", got.stdout, got.status, got.stderr)
+		}
+	})
+
+	t.Run("await-spawned-result", func(t *testing.T) {
+		files := map[string]string{"alder.toml": taskManifest, "src/main.al": `module hello.main
+import std.task { TaskGroup }
+import std.test { SimIo }
+
+fn child() -> U64 { return 42 }
+
+pub fn main() -> I32 {
+    let sim = SimIo.new()
+    using tasks = TaskGroup.new(sim)
+    let task = tasks.spawn(child())
+    let value = await task
+    if value == 42 { return 0 }
+    return 19
+}
+`}
+		got := runProductionCompilerEnv(t, exe, t.TempDir(), env, files, "run")
+		if got.status != 0 || got.stdout != "" || got.stderr != "" {
+			t.Fatalf("await did not return the spawned child's 42: %+v", got)
+		}
+	})
+
 	for _, tc := range []struct{ module, capability string }{{"std.test", "SimIo"}, {"std.io", "Blocking"}} {
 		t.Run("reject-"+tc.capability+"-parameter", func(t *testing.T) {
 			files := map[string]string{"alder.toml": taskManifest, "src/main.al": "module hello.main\nimport " + tc.module + " { " + tc.capability + " }\n\npub fn main(io: " + tc.capability + ") -> I32 { return 0 }\n"}
