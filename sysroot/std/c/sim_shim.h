@@ -16,6 +16,10 @@
 
 #include "std/c/task_shim.h"
 
+/* Lowering marker: the splitter removes this call and emits the canonical
+ * park save. The runtime provides no definition. */
+void alder_task_park(void);
+
 static inline int task_timer_in(unsigned long long delay) {
     return alder_timer_in((uint64_t)delay) ? 1 : 0;
 }

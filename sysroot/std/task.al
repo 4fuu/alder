@@ -21,10 +21,6 @@ import c "std/c/task_shim.h" as taskrt {
     raw fn await_parkable = "task_await_parkable"(child: c.ULongLong) -> c.Int
     raw fn release_spawned = "task_release_spawned"(child: c.ULongLong) -> Unit
     raw fn yield_current = "task_yield_current"() -> Unit
-    raw fn timer_in = "task_timer_in"(delay: c.ULongLong) -> c.Int
-    raw fn timer_clear = "task_timer_clear"() -> Unit
-    raw fn clock_now = "task_clock_now"() -> c.ULongLong
-    raw fn cancelled_now = "task_cancelled_now"() -> c.Int
 }
 
 import c "alder.h" as runtime {
@@ -47,6 +43,7 @@ pub type TaskGroup(I: type(Io, AsyncIo)) {
 /// scope.
 pub type Task(T: type) {
     child: U64
+    out_offset: U64
 }
 
 /// Declaration-only parameter type of the five standard task operations.
@@ -229,7 +226,7 @@ pub fn yield(I: type(Io, AsyncIo), io: I) -> Unit {
 /// The declaration types the expression as `T`; lowering replaces the call
 /// with the child result view, the copy into this activation's domain, and the
 /// child release.
-fn take_result(T: type) -> T {
+fn take_result(T: type, offset: U64) -> T {
     panic("std.task.take_result is lowered by the compiler")
 }
 
@@ -244,5 +241,5 @@ fn await_result(T: type, take task: Task(T)) -> T {
     let child_id = t.child.to_c_ulonglong()
     let _ready = unsafe c { taskrt.await_parkable(child_id) }
     unsafe c { runtime.park() }
-    return take_result(T)
+    return take_result(T, t.out_offset)
 }

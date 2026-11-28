@@ -20,18 +20,14 @@ import std.time { Duration }
 
 import c "std/c/sim_shim.h" as simrt {
     raw fn install_hooks = "task_install_sim_hooks"() -> Unit
+    raw fn park = "alder_task_park"() -> Unit
     raw fn clock_now = "task_clock_now"() -> c.ULongLong
     raw fn timer_in = "task_timer_in"(delay: c.ULongLong) -> c.Int
     raw fn yield_current = "task_yield_current"() -> Unit
-    raw fn cancelled_now = "task_cancelled_now"() -> c.Int
     raw fn rng_new = "sim_rng_new"(seed: c.ULongLong) -> c.ULongLong
     raw fn rng_fill = "sim_rng_fill"(handle: c.ULongLong, buffer: c.Ptr(c.UChar), length: c.ULongLong) -> Unit
     raw fn write_stdout = "task_write_stdout"(data: c.ConstPtr(c.UChar), length: c.ULongLong) -> c.Int
     raw fn write_stderr = "task_write_stderr"(data: c.ConstPtr(c.UChar), length: c.ULongLong) -> c.Int
-}
-
-import c "alder.h" as runtime {
-    raw fn park = "alder_task_park"() -> Unit
 }
 
 /// Terminates the process with the test failure message.
@@ -274,7 +270,7 @@ impl Io for SimIo {
         if registered.to_i32() == 0 {
             panic.panic("std.test.SimIo: sleep deadline is unavailable")
         }
-        unsafe c { runtime.park() }
+        unsafe c { simrt.park() }
         return
     }
 
@@ -297,7 +293,7 @@ impl Io for SimIo {
 
     fn check_cancel(self) -> Unit {
         unsafe c { simrt.yield_current() }
-        unsafe c { runtime.park() }
+        unsafe c { simrt.park() }
         return
     }
 }

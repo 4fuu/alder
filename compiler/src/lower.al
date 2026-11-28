@@ -5167,6 +5167,9 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         if expression.annotation == 0 || expression.annotation > __s0_buffer_len(CallAnnotationRec, store.call_annotations) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
         let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, expression.annotation - 1)
         if annotation.owner != owner { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        if annotation.kind == 1 && lower_task_symbol_is(source_state, store, annotation.target, "take_result") {
+            return lower_task_take_result(d, source_state, spans, store, state, owner, function, block, expression, expression_id, environment, panic_block)
+        }
         var current = state
         var spawn_target: U64 = 0
         var spawn_group: U64 = 0
@@ -9969,6 +9972,239 @@ fn lower_step_flags_closure(d: Domain, store0: CheckStore, flags0: __s0_Buffer(U
     return Ok(flags)
 }
 
+fn lower_task_value_type(mir: MirStore, function: U64, value: U64) -> U64 {
+    if value == 0 { return 0 }
+    let rec = lower_step_value_by_ordinal(mir, function, value - 1)
+    if rec.function != function { return 0 }
+    return rec.value_type
+}
+
+fn lower_task_symbol_is(source_state: State, store: CheckStore, target: U64, word: __s0_String) -> Bool {
+    if target == 0 || target > __s0_buffer_len(SymbolRec, store.symbols) { return false }
+    let symbol = __s0_buffer_get(SymbolRec, store.symbols, target - 1)
+    if !source_path_suffix_is(source_state, symbol.source, "std/task.al") { return false }
+    return symbol_name_matches_word(source_state, symbol, word)
+}
+
+fn lower_task_binding_param_type(store: MirStore, function: U64, ordinal: U64) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirOperandRec, store.operands) {
+        let operand = __s0_buffer_get(MirOperandRec, store.operands, at)
+        if operand.kind == mir_operand_binding_param() && operand.owner == function && operand.ordinal == ordinal { return operand.operand_type }
+        at = at + 1
+    }
+    return 0
+}
+
+fn lower_task_binding_call(d: Domain, state: LowerState, function: U64, block: U64, name: __s0_String, c_name: __s0_String, result_type: U64, args: __s0_Buffer(U64)) -> Result(LowerStep, __s0_Error) {
+    let made = try lower_step_binding_fn(d, state, name, c_name, result_type)
+    var current = made.state
+    if mir_operand_count(current.mir, mir_operand_binding_param(), made.id, 0) == 0 {
+        var param_ordinal: U64 = 0
+        while param_ordinal < __s0_buffer_len(U64, args) {
+            let arg_type = lower_task_value_type(current.mir, function, __s0_buffer_get(U64, args, param_ordinal))
+            if arg_type == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+            current = lower_with_mir(current, try mir_add_binding_fn_param(d, current.mir, made.id, param_ordinal, arg_type))
+            param_ordinal = param_ordinal + 1
+        }
+    }
+    var coerced = try __s0_buffer_new(U64, d)
+    var coerce_at: U64 = 0
+    while coerce_at < __s0_buffer_len(U64, args) {
+        var arg = __s0_buffer_get(U64, args, coerce_at)
+        let expected = lower_task_binding_param_type(current.mir, made.id, coerce_at)
+        let actual = lower_task_value_type(current.mir, function, arg)
+        if expected != 0 && actual != 0 && expected != actual {
+            let converted = try lower_add_typed_result(d, current, function, block, expected)
+            current = converted.state
+            let cast = try lower_add_instr(d, current, function, block, mir_op_c_num_cast(), converted.id, 0, expected, arg, 0, 0, "")
+            current = cast.state
+            arg = converted.id
+        }
+        coerced = try __s0_buffer_append(U64, d, coerced, arg)
+        coerce_at = coerce_at + 1
+    }
+    var result: U64 = 0
+    if result_type != mir_type_unit() {
+        let value = try lower_add_typed_result(d, current, function, block, result_type)
+        current = value.state
+        result = value.id
+    }
+    let instr = try lower_add_instr(d, current, function, block, mir_op_c_binding_call(), result, 0, 0, 0, 0, made.id, "")
+    current = instr.state
+    var ordinal: U64 = 0
+    while ordinal < __s0_buffer_len(U64, coerced) {
+        current = try lower_add_instr_operand(d, current, instr.id, ordinal, __s0_buffer_get(U64, coerced, ordinal), mir_operand_instruction(), "")
+        ordinal = ordinal + 1
+    }
+    return Ok(LowerStep(state: current, id: result))
+}
+
+fn lower_task_const_u64(d: Domain, state: LowerState, function: U64, block: U64, value: U64, suffix: U64) -> Result(LowerStep, __s0_Error) {
+    let name = try lower_decimal_name(d, "__alder_task_const_", suffix * 10 + value)
+    var existing: U64 = 0
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirConstRec, state.mir.constants) {
+        let item = __s0_buffer_get(MirConstRec, state.mir.constants, at)
+        if mir_vname_word(state.mir, item.name_start, item.name_end, name) { existing = at + 1 }
+        at = at + 1
+    }
+    var current = state
+    var signed: I64 = 0
+    if value == 1 { signed = 1 }
+    if existing == 0 {
+        let constant = try mir_add_const(d, state.mir, name, mir_type_u64(), mir_const_int(), 0, signed, 0, "")
+        current = lower_with_mir(state, constant.store)
+    }
+    let result = try lower_add_typed_result(d, current, function, block, mir_type_u64())
+    current = result.state
+    let instr = try lower_add_instr(d, current, function, block, mir_op_const_get(), result.id, 0, 0, 0, 0, 0, name)
+    return Ok(LowerStep(state: instr.state, id: result.id))
+}
+
+fn lower_task_type_align(d: Domain, state: LowerState, function: U64, block: U64, type_id: U64) -> Result(LowerStep, __s0_Error) {
+    let result = try lower_add_typed_result(d, state, function, block, mir_type_u64())
+    let instr = try lower_add_instr(d, result.state, function, block, mir_op_type_align(), result.id, 0, type_id, 0, 0, 0, "")
+    return Ok(LowerStep(state: instr.state, id: result.id))
+}
+
+fn lower_task_type_size(d: Domain, state: LowerState, function: U64, block: U64, type_id: U64) -> Result(LowerStep, __s0_Error) {
+    let result = try lower_add_typed_result(d, state, function, block, mir_type_u64())
+    let instr = try lower_add_instr(d, result.state, function, block, mir_op_type_size(), result.id, 0, type_id, 0, 0, 0, "")
+    return Ok(LowerStep(state: instr.state, id: result.id))
+}
+
+fn lower_task_align_up(d: Domain, state: LowerState, function: U64, block: U64, value: U64, alignment: U64, panic_block: U64, salt: U64) -> Result(LowerStep, __s0_Error) {
+    let one = try lower_task_const_u64(d, state, function, block, 1, salt)
+    var current = one.state
+    let minus = try lower_add_typed_result(d, current, function, block, mir_type_u64())
+    current = minus.state
+    let sub = try lower_add_instr(d, current, function, block, mir_op_int_sub_checked(), minus.id, 0, 0, alignment, one.id, panic_block, "")
+    current = sub.state
+    let sum = try lower_add_typed_result(d, current, function, block, mir_type_u64())
+    current = sum.state
+    let add = try lower_add_instr(d, current, function, block, mir_op_int_add_checked(), sum.id, 0, 0, value, minus.id, panic_block, "")
+    current = add.state
+    let quotient = try lower_add_typed_result(d, current, function, block, mir_type_u64())
+    current = quotient.state
+    let div = try lower_add_instr(d, current, function, block, mir_op_int_div_checked(), quotient.id, 0, 0, sum.id, alignment, panic_block, "")
+    current = div.state
+    let product = try lower_add_typed_result(d, current, function, block, mir_type_u64())
+    current = product.state
+    let mul = try lower_add_instr(d, current, function, block, mir_op_int_mul_checked(), product.id, 0, 0, quotient.id, alignment, panic_block, "")
+    return Ok(LowerStep(state: mul.state, id: product.id))
+}
+
+fn lower_task_const_max_u64(d: Domain, state0: LowerState, function: U64, block: U64, suffix: U64) -> Result(LowerStep, __s0_Error) {
+    let name = try lower_decimal_name(d, "__alder_task_const_max_", suffix)
+    var existing: U64 = 0
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirConstRec, state0.mir.constants) {
+        let item = __s0_buffer_get(MirConstRec, state0.mir.constants, at)
+        if mir_vname_word(state0.mir, item.name_start, item.name_end, name) { existing = at + 1 }
+        at = at + 1
+    }
+    var current = state0
+    if existing == 0 {
+        let constant = try mir_add_const(d, state0.mir, name, mir_type_u64(), mir_const_int(), 0, -1, 0, "")
+        current = lower_with_mir(state0, constant.store)
+    }
+    let result = try lower_add_typed_result(d, current, function, block, mir_type_u64())
+    let instr = try lower_add_instr(d, result.state, function, block, mir_op_const_get(), result.id, 0, 0, 0, 0, 0, name)
+    return Ok(LowerStep(state: instr.state, id: result.id))
+}
+
+fn lower_task_align_up_unchecked(d: Domain, state0: LowerState, function: U64, block: U64, value: U64, alignment: U64, suffix: U64) -> Result(LowerStep, __s0_Error) {
+    var current = state0
+    let one = try lower_task_const_u64(d, current, function, block, 1, suffix + 1)
+    current = one.state
+    let mask_value = try lower_add_typed_result(d, current, function, block, mir_type_u64())
+    current = mask_value.state
+    let mask = try lower_add_instr(d, current, function, block, mir_op_int_sub_wrapping(), mask_value.id, 0, 0, alignment, one.id, 0, "")
+    current = mask.state
+    let sum_value = try lower_add_typed_result(d, current, function, block, mir_type_u64())
+    current = sum_value.state
+    let sum = try lower_add_instr(d, current, function, block, mir_op_int_add_wrapping(), sum_value.id, 0, 0, value, mask_value.id, 0, "")
+    current = sum.state
+    let all = try lower_task_const_max_u64(d, current, function, block, suffix + 2)
+    current = all.state
+    let inverted = try lower_add_typed_result(d, current, function, block, mir_type_u64())
+    current = inverted.state
+    let not_mask = try lower_add_instr(d, current, function, block, mir_op_int_xor(), inverted.id, 0, 0, mask_value.id, all.id, 0, "")
+    current = not_mask.state
+    let aligned = try lower_add_typed_result(d, current, function, block, mir_type_u64())
+    current = aligned.state
+    let instruction = try lower_add_instr(d, current, function, block, mir_op_int_and(), aligned.id, 0, 0, sum_value.id, inverted.id, 0, "")
+    return Ok(LowerStep(state: instruction.state, id: aligned.id))
+}
+
+fn lower_task_result_offset(d: Domain, state0: LowerState, function: U64, block: U64, frame: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
+    var current = state0
+    let zero = try lower_task_const_u64(d, current, function, block, 0, function * 100 + 2)
+    current = zero.state
+    var offset = zero.id
+    var ordinal: U64 = 0
+    while ordinal < 256 {
+        let part = lower_step_frame_part_at(current.mir, frame, ordinal)
+        if part.owner != frame { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+        if mir_vname_word(current.mir, part.name_start, part.name_end, "out") {
+            let align = try lower_task_type_align(d, current, function, block, part.part_type)
+            current = align.state
+            let salt = function * 100000000 + block * 1000000 + ordinal * 10
+            let aligned = try lower_task_align_up_unchecked(d, current, function, block, offset, align.id, salt)
+            current = aligned.state
+            return Ok(LowerStep(state: current, id: aligned.id))
+        }
+        let align = try lower_task_type_align(d, current, function, block, part.part_type)
+        current = align.state
+        let salt = function * 100000000 + block * 1000000 + ordinal * 10
+        let aligned = try lower_task_align_up_unchecked(d, current, function, block, offset, align.id, salt)
+        current = aligned.state
+        let size = try lower_task_type_size(d, current, function, block, part.part_type)
+        current = size.state
+        let next = try lower_add_typed_result(d, current, function, block, mir_type_u64())
+        current = next.state
+        let add = try lower_add_instr(d, current, function, block, mir_op_int_add_wrapping(), next.id, 0, 0, aligned.id, size.id, 0, "")
+        current = add.state
+        offset = next.id
+        ordinal = ordinal + 1
+    }
+    return Ok(LowerStep(state: lower_invalid(current), id: 0))
+}
+
+fn lower_task_take_result(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state0: LowerState, owner: U64, function: U64, block: U64, expression: CheckedExprRec, expression_id: U64, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
+    if expression.child_count != 1 || expression.first_child == 0 { return Ok(LowerStep(state: lower_invalid(state0), id: 0)) }
+    let result_type = try lower_type(d, source_state, store, state0, expression.checked_type)
+    var current = result_type.state
+    if !current.valid { return Ok(LowerStep(state: current, id: 0)) }
+    let offset_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
+    let offset = try lower_expression(d, source_state, spans, store, current, owner, function, block, offset_id, environment, panic_block)
+    current = offset.state
+    if !current.valid { return Ok(LowerStep(state: current, id: 0)) }
+    let empty = try __s0_buffer_new(U64, d)
+    let view = try mir_intern_type(d, current.mir, mir_type_kind_safe_mut(), result_type.id, 0, 0, empty, 0)
+    current = lower_with_mir(current, view.store)
+    var args = try __s0_buffer_new(U64, d)
+    args = try __s0_buffer_append(U64, d, args, offset.id)
+    let slice = try lower_task_binding_call(d, current, function, block, "task_await_result_slice", "task_await_result_slice", view.type_id, args)
+    current = slice.state
+    if !current.valid { return Ok(LowerStep(state: current, id: 0)) }
+    let place = try lower_step_deref_place(d, current, function, slice.id)
+    current = place.state
+    let loaded = try lower_helper_load(d, current, function, block, place.id, result_type.id)
+    current = loaded.state
+    let domain = lower_domain_value(current, store, owner)
+    if domain == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+    let copy = try lower_step_new_instr_value(d, current, function, block, result_type.id)
+    current = copy.state
+    let copied = try lower_add_instr(d, current, function, block, mir_op_copy_to_domain(), copy.id, 0, 0, domain, loaded.id, 0, "")
+    current = copied.state
+    let released = try lower_task_binding_call(d, current, function, block, "task_release_awaited", "task_release_awaited", mir_type_unit(), try __s0_buffer_new(U64, d))
+    current = released.state
+    if !current.valid { return Ok(LowerStep(state: current, id: 0)) }
+    return Ok(LowerStep(state: current, id: copy.id))
+}
+
 fn lower_task_spawn_target(source_state: State, store: CheckStore, owner: U64) -> Bool {
     let symbol = __s0_buffer_get(SymbolRec, store.symbols, owner - 1)
     if symbol.inherent_owner == 0 || !source_path_suffix_is(source_state, symbol.source, "std/task.al") { return false }
@@ -12113,10 +12349,14 @@ fn lower_step_clone_spawn(d: Domain, body0: LowerStepBodyRec, site: LowerSuspens
     body.state = try lower_step_own_spawn_domain(d, spawned.state, body.function, block, task.id)
     if result != 0 {
         let result_type = lower_step_value_by_ordinal(body.state.mir, body.function, result - 1).value_type
+        let offset = try lower_task_result_offset(d, body.state, body.function, block, callee.frame, 0)
+        body.state = offset.state
+        if offset.id == 0 { return Ok(lower_step_invalid_body(body)) }
         let wrapped = try lower_add_instr(d, body.state, body.function, block, mir_op_aggregate_construct(), result, 0, result_type, 0, 0, 0, "")
         let ordinal = lower_step_instr_by_id(wrapped.state.mir, wrapped.id).ordinal
         body.state = try lower_step_set_value_def(d, wrapped.state, body.function, result, block, ordinal + 1)
         body.state = try lower_add_instr_operand(d, body.state, wrapped.id, 0, task.id, mir_operand_aggregate_field(), "child")
+        body.state = try lower_add_instr_operand(d, body.state, wrapped.id, 1, offset.id, mir_operand_aggregate_field(), "out_offset")
     }
     return Ok(body)
 }

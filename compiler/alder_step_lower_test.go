@@ -249,14 +249,15 @@ pub trait AsyncIo {}
 		"std/task.al": `module std.task
 import std.io { AsyncIo, Io }
 pub type Pending(T: type) {}
-pub type Task(T: type) { child: U64 }
+pub type Task(T: type) { child: U64
+    out_offset: U64 }
 pub type TaskGroup(I: type(Io, AsyncIo)) {
     capability: I
     group: U64
 }
 impl(I: type(Io, AsyncIo)) TaskGroup(I) {
     fn new(io: I) -> TaskGroup(I) { return TaskGroup(capability: io, group: 37) }
-    fn spawn(T: type, mut self, pending: Pending(T)) -> Task(T) { return Task(child: 0) }
+    fn spawn(T: type, mut self, pending: Pending(T)) -> Task(T) { return Task(child: 0, out_offset: 0) }
     fn start(mut self, pending: Pending(Unit)) -> Unit { return }
 }
 impl(I: type(Io, AsyncIo)) Cleanup for TaskGroup(I) {
