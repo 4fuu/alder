@@ -11169,38 +11169,17 @@ fn lower_step_split_cleanup_run(d: Domain, state0: LowerState, function: U64, ru
     }
     let block_to_run = try mir_add_terminator(d, state.mir, MirTermRec(function: function, block: old_block, kind: mir_term_jump(), value: 0, target: run_made.id, then_block: 0, else_block: 0))
     state = lower_with_mir(state, block_to_run.store)
-    // The run block reloads the frame-resident scope; a fresh thunk
-    // invocation cannot see an SSA value from the pre-suspension block. The
-    // moved suffix's run and end pairs use the same reload.
-    var run_scope = old_scope
-    if scope_field != 0 {
-        let scope_part = lower_step_frame_part_at(state.mir, frame, scope_field - 1)
-        if scope_part.owner == frame {
-            let loaded = try lower_step_load_field(d, state, function, run_made.id, frame_deref, scope_part)
-            state = loaded.state
-            run_scope = loaded.id
-            var use_at: U64 = 0
-            while use_at < __s0_buffer_len(U64, suffix) {
-                let id = __s0_buffer_get(U64, suffix, use_at)
-                var item = __s0_buffer_get(MirInstrRec, state.mir.instructions, id - 1)
-                if (item.op == mir_op_cleanup_scope_run() || item.op == mir_op_cleanup_scope_end()) && item.a == old_scope {
-                    item.a = run_scope
-                    __s0_buffer_set(MirInstrRec, state.mir.instructions, id - 1, item)
-                }
-                use_at = use_at + 1
-            }
-        }
-    }
-    // The cursor loop is emitted at this instruction by cgen; its structural
-    // after edge closes the same scope in the moved suffix.
-    let new_run = try mir_add_instruction(d, state.mir, MirInstrRec(function: function, block: run_made.id, ordinal: 1, op: mir_op_cleanup_scope_run(), result: 0, place: 0, type_op: 0, a: run_scope, b: 0, c: 0, target: 0, name_start: run_value.name_start, name_end: run_value.name_end))
+    // The run block reuses the lexical begin whose anchor store already
+    // dominates it. The cursor loop is emitted at this instruction by cgen;
+    // its structural after edge closes the same begin in the moved suffix.
+    let new_run = try mir_add_instruction(d, state.mir, MirInstrRec(function: function, block: run_made.id, ordinal: 0, op: mir_op_cleanup_scope_run(), result: 0, place: 0, type_op: 0, a: old_scope, b: 0, c: 0, target: 0, name_start: run_value.name_start, name_end: run_value.name_end))
     state = lower_with_mir(state, new_run.store)
     let false_const = try lower_step_named_const(d, state.mir, "__alder_step_false", mir_type_bool(), mir_const_bool(), 0)
     state = lower_with_mir(state, false_const.store)
     let false_rec = __s0_buffer_get(MirConstRec, state.mir.constants, false_const.id - 1)
-    let cursor_value = try lower_step_new_value(d, state, function, mir_type_bool(), mir_value_def_instruction(), run_made.id, 3)
+    let cursor_value = try lower_step_new_value(d, state, function, mir_type_bool(), mir_value_def_instruction(), run_made.id, 2)
     state = cursor_value.state
-    let cursor = try mir_add_instruction(d, state.mir, MirInstrRec(function: function, block: run_made.id, ordinal: 2, op: mir_op_const_get(), result: cursor_value.id, place: 0, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: false_rec.name_start, name_end: false_rec.name_end))
+    let cursor = try mir_add_instruction(d, state.mir, MirInstrRec(function: function, block: run_made.id, ordinal: 1, op: mir_op_const_get(), result: cursor_value.id, place: 0, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: false_rec.name_start, name_end: false_rec.name_end))
     state = lower_with_mir(state, cursor.store)
     let run_to_after = try mir_add_terminator(d, state.mir, MirTermRec(function: function, block: run_made.id, kind: mir_term_branch(), value: cursor_value.id, target: 0, then_block: after_made.id, else_block: after_made.id))
     state = lower_with_mir(state, run_to_after.store)
@@ -11251,141 +11230,15 @@ type LowerStepCleanupExpansionRec {
     extra_calls: U64
 }
 
-fn lower_debug_text(text: __s0_String) -> Unit {
-    var at: U64 = 0
-    while at < len(text) {
-        let _ = unsafe c { alderhost_stderr_byte(text[at]) }
-        at = at + 1
-    }
-    return
-}
-
-fn lower_debug_number(d: Domain, label: __s0_String, value: U64) -> Unit {
-    lower_debug_text(label)
-    let text = match lower_decimal_name(d, "", value) {
-        Ok(digits) => digits
-        Err(_) => "?"
-    }
-    lower_debug_text(text)
-    return
-}
-
-fn lower_debug_name(store: MirStore, start: U64, end: U64) -> Unit {
-    var at: U64 = start
-    while at < end && at < __s0_buffer_len(U8, store.names) {
-        let byte = __s0_buffer_get(U8, store.names, at)
-        let _ = unsafe c { alderhost_stderr_byte(byte) }
-        at = at + 1
-    }
-    return
-}
-
-fn lower_debug_block(store: MirStore, function: U64, block: U64) -> Unit {
-    var at: U64 = 0
-    while at < __s0_buffer_len(MirBlockRec, store.blocks) {
-        let item = __s0_buffer_get(MirBlockRec, store.blocks, at)
-        if item.function == function && item.ordinal + 1 == block {
-            lower_debug_name(store, item.name_start, item.name_end)
-            return
-        }
-        at = at + 1
-    }
-    lower_debug_text("?")
-    return
-}
-
-fn lower_debug_function(store: MirStore, function: U64) -> Unit {
-    if function < 1 || function > __s0_buffer_len(MirFunctionRec, store.functions) {
-        lower_debug_text("?")
-        return
-    }
-    let item = __s0_buffer_get(MirFunctionRec, store.functions, function - 1)
-    lower_debug_name(store, item.name_start, item.name_end)
-    return
-}
-
 fn lower_step_cleanup_expand(d: Domain, state0: LowerState, layouts: LowerStepLayoutsRec, layout: LowerStepLayoutRec, step_function: U64, frame: U64, frame_deref: U64, state_type: U64, status_type: U64) -> Result(LowerStepCleanupExpansionRec, __s0_Error) {
     var state = state0
     let instruction_limit = __s0_buffer_len(MirInstrRec, state.mir.instructions)
     var next_cleanup = mir_type_part_count(state.mir, state_type, mir_type_part_variant()) - (layout.point_count + 1)
     var extra_calls: U64 = 0
-    lower_debug_text("\nDBG expand f=")
-    lower_debug_number(d, "", step_function)
-    lower_debug_text(" name=")
-    lower_debug_function(state.mir, step_function)
-    lower_debug_number(d, " scount=", layout.s_count)
-    lower_debug_number(d, " points=", layout.point_count)
-    var dbg_save_at: U64 = 0
-    while dbg_save_at < layout.s_count {
-        let dbg_old = __s0_buffer_get(U64, layouts.s_values, layout.first_s - 1 + dbg_save_at)
-        lower_debug_text(" svalue")
-        lower_debug_number(d, "", dbg_save_at)
-        lower_debug_number(d, "=", dbg_old)
-        dbg_save_at = dbg_save_at + 1
-    }
-    var dbg_part_at: U64 = 0
-    while dbg_part_at < layout.s_count {
-        let dbg_name = try lower_decimal_name(d, "s", dbg_part_at)
-        let dbg_part = lower_step_field_part_named(state.mir, frame, dbg_name)
-        lower_debug_text(" field_")
-        lower_debug_text(dbg_name)
-        lower_debug_number(d, " ord=", dbg_part.ordinal)
-        lower_debug_number(d, " owner=", dbg_part.owner)
-        dbg_part_at = dbg_part_at + 1
-    }
-    var dbg_save_i: U64 = 0
-    while dbg_save_i < __s0_buffer_len(LowerStepSaveRec, layouts.saves) {
-        let dbg_rec = __s0_buffer_get(LowerStepSaveRec, layouts.saves, dbg_save_i)
-        if dbg_rec.kind == 5 {
-            lower_debug_text(" kind5#")
-            lower_debug_number(d, "", dbg_save_i + 1)
-            lower_debug_number(d, " pos=", dbg_rec.pos)
-            let dbg_part = lower_step_frame_part_at(state.mir, frame, dbg_rec.pos)
-            lower_debug_text(" part=")
-            lower_debug_name(state.mir, dbg_part.name_start, dbg_part.name_end)
-        }
-        dbg_save_i = dbg_save_i + 1
-    }
-    lower_debug_text("\n")
     var scan: U64 = 0
     while scan < instruction_limit {
         let run = __s0_buffer_get(MirInstrRec, state.mir.instructions, scan)
         if run.function == step_function && run.op == mir_op_cleanup_scope_run() {
-            lower_debug_text("DBG run block=")
-            lower_debug_block(state.mir, step_function, run.block)
-            lower_debug_number(d, " a=", run.a)
-            lower_debug_number(d, " scope=", lower_step_scope_field(state.mir, step_function, run.a))
-            lower_debug_number(d, " prefix_cancel=", 0)
-            if lower_step_block_name_has_prefix(state.mir, step_function, run.block, "bb_cancel") { lower_debug_text(" true") } else { lower_debug_text(" false") }
-            lower_debug_text("\n")
-            var dbg_def: U64 = 0
-            if run.a >= 1 && run.a <= __s0_buffer_len(MirValueRec, state.mir.values) {
-                let dbg_v = __s0_buffer_get(MirValueRec, state.mir.values, run.a - 1)
-                lower_debug_number(d, "  value fn=", dbg_v.function)
-                lower_debug_number(d, " def_kind=", dbg_v.def_kind)
-                lower_debug_number(d, " item=", dbg_v.item)
-                lower_debug_number(d, " block=", dbg_v.block)
-                var dbg_stores: U64 = 0
-                var dbg_store_at: U64 = 0
-                while dbg_store_at < __s0_buffer_len(MirInstrRec, state.mir.instructions) {
-                    let dbg_store = __s0_buffer_get(MirInstrRec, state.mir.instructions, dbg_store_at)
-                    if dbg_store.function == step_function && dbg_store.op == mir_op_store() && dbg_store.a == run.a { dbg_stores = dbg_stores + 1 }
-                    dbg_store_at = dbg_store_at + 1
-                }
-                lower_debug_number(d, " stores=", dbg_stores)
-                dbg_def = lower_step_def_instruction(state.mir, step_function, dbg_v)
-                lower_debug_number(d, " def_instr=", dbg_def)
-                if dbg_def != 0 {
-                    let dbg_item = __s0_buffer_get(MirInstrRec, state.mir.instructions, dbg_def - 1)
-                    lower_debug_number(d, " def_op=", dbg_item.op)
-                    lower_debug_number(d, " def_place=", dbg_item.place)
-                    lower_debug_number(d, " def_a=", dbg_item.a)
-                }
-            }
-            lower_debug_text("\n")
-        }
-        if run.function == step_function && run.op == mir_op_cleanup_scope_run() {
-            let cancel_site = lower_step_block_name_has_prefix(state.mir, step_function, run.block, "bb_cancel")
             var scope_field = lower_step_scope_field(state.mir, step_function, run.a)
             if scope_field == 0 && layout.s_count == 1 {
                 let only = lower_step_field_part_named(state.mir, frame, "s0")
@@ -11397,16 +11250,6 @@ fn lower_step_cleanup_expand(d: Domain, state0: LowerState, layouts: LowerStepLa
                 while push_at < instruction_limit {
                     let push = __s0_buffer_get(MirInstrRec, state.mir.instructions, push_at)
                     let push_field = lower_step_scope_field(state.mir, step_function, push.a)
-                    if push.function == step_function && push.op == mir_op_cleanup_push() {
-                        lower_debug_text("DBG push target=")
-                        lower_debug_number(d, "", push.target)
-                        lower_debug_number(d, " field=", push_field)
-                        lower_debug_number(d, " published=", lower_step_published_for_direct(state.mir, push.target))
-                        lower_debug_number(d, " layout=", lower_step_layout_for_function(layouts.layouts, push.target))
-                        lower_debug_text(" callee=")
-                        lower_debug_function(state.mir, push.target)
-                        lower_debug_text("\n")
-                    }
                     if push.function == step_function && push.op == mir_op_cleanup_push() && (scope_field == 0 || push_field == 0 || push_field == scope_field) && lower_step_published_for_direct(state.mir, push.target) != 0 { hooks = try __s0_buffer_append(U64, d, hooks, push.target) }
                     push_at = push_at + 1
                 }
@@ -11438,6 +11281,8 @@ fn lower_step_cleanup_expand(d: Domain, state0: LowerState, layouts: LowerStepLa
                         state = after.state
                         let finish = try lower_step_add_block(d, state, step_function, lower_step_next_block_ordinal(state.mir, step_function), try lower_decimal_name(d, "bb_cleanup_finish_", next_cleanup))
                         state = finish.state
+                        let cancel = try lower_step_add_block(d, state, step_function, lower_step_next_block_ordinal(state.mir, step_function), try lower_decimal_name(d, "bb_cleanup_cancel_", next_cleanup))
+                        state = cancel.state
                         let cleanup_result_part = lower_step_frame_part_at(state.mir, frame, split.out_part)
                         // The structural branch makes this hook's canonical
                         // suspend block reachable. Generated C returns from the
@@ -11506,12 +11351,9 @@ fn lower_step_cleanup_expand(d: Domain, state0: LowerState, layouts: LowerStepLa
                             s_values = try __s0_buffer_append(U64, d, s_values, loaded.id)
                             s_at = s_at + 1
                         }
-                        // A cancelled hook still drains the remaining entries
-                        // through the cursor; the cursor loop only yields a
-                        // cancelled driver if the shield itself was violated.
                         let cancelled = try lower_step_cancelled_call(d, state, step_function, resume.id, layouts.cancelled_target)
                         state = cancelled.state
-                        state = try lower_branch(d, state, step_function, resume.id, cancelled.id, after.id, after.id)
+                        state = try lower_branch(d, state, step_function, resume.id, cancelled.id, cancel.id, after.id)
                         // The completed hook's activation domain is released
                         // before its scope is re-entered at the next frame
                         // slot. The cursor runs here; when it finds another
@@ -11534,19 +11376,20 @@ fn lower_step_cleanup_expand(d: Domain, state0: LowerState, layouts: LowerStepLa
                         run_sites = try __s0_buffer_append(U64, d, run_sites, retry.id)
                         let finish_end = try lower_add_instr(d, state, step_function, finish.id, mir_op_cleanup_scope_end(), 0, 0, 0, began.id, 0, 0, "")
                         state = finish_end.state
-                        if cancel_site {
-                            // A cancellation run continues with the rest of
-                            // its cancel block, which returns cancelled after
-                            // the remaining scopes and the shield pop.
-                            let finish_jump = try mir_add_terminator(d, state.mir, MirTermRec(function: step_function, block: finish.id, kind: mir_term_jump(), value: 0, target: split.after_block, then_block: 0, else_block: 0))
-                            state = lower_with_mir(state, finish_jump.store)
-                        } else {
-                            let saved_result = try lower_step_load_field(d, state, step_function, finish.id, frame_deref, lower_step_frame_part_at(state.mir, frame, split.out_part))
-                            state = saved_result.state
-                            let out_part = lower_step_field_part_named(state.mir, frame, "out")
-                            state = try lower_step_store_field(d, state, step_function, finish.id, frame_deref, out_part, saved_result.id)
-                            state = try lower_step_return_status(d, state, step_function, finish.id, status_type, "done")
-                        }
+                        let saved_result = try lower_step_load_field(d, state, step_function, finish.id, frame_deref, lower_step_frame_part_at(state.mir, frame, split.out_part))
+                        state = saved_result.state
+                        let out_part = lower_step_field_part_named(state.mir, frame, "out")
+                        state = try lower_step_store_field(d, state, step_function, finish.id, frame_deref, out_part, saved_result.id)
+                        state = try lower_step_return_status(d, state, step_function, finish.id, status_type, "done")
+                        state = (try lower_add_instr(d, state, step_function, cancel.id, mir_op_domain_destroy(), 0, 0, 0, ry.id, 0, 0, "")).state
+                        let cancel_began = try lower_step_new_instr_value(d, state, step_function, cancel.id, scope_part.part_type)
+                        state = cancel_began.state
+                        let cancel_begin = try lower_add_instr(d, state, step_function, cancel.id, mir_op_cleanup_scope_begin(), cancel_began.id, 0, 0, 0, 0, 0, "")
+                        state = cancel_begin.state
+                        state = try lower_step_store_field(d, state, step_function, cancel.id, frame_deref, scope_part, cancel_began.id)
+                        state = (try lower_add_instr(d, state, step_function, cancel.id, mir_op_cleanup_scope_run(), 0, 0, 0, cancel_began.id, 0, 0, "")).state
+                        state = (try lower_add_instr(d, state, step_function, cancel.id, mir_op_cleanup_scope_end(), 0, 0, 0, cancel_began.id, 0, 0, "")).state
+                        state = try lower_step_return_status(d, state, step_function, cancel.id, status_type, "cancelled")
                         hook_rows = try __s0_buffer_append(MirStepCallRec, d, hook_rows, MirStepCallRec(resume: ordinal, kind: 2, x_field: pair.x_pos, y_field: pair.y_pos, callee: callee_step, instruction: 0, domain_instruction: split.run_instruction, continuation: 0, continuation_field: 0))
                         next_cleanup = next_cleanup + 1
                     }
@@ -11579,51 +11422,6 @@ fn lower_step_cleanup_expand(d: Domain, state0: LowerState, layouts: LowerStepLa
             }
         }
         scan = scan + 1
-    }
-    if step_function == 334 || step_function == 340 {
-        lower_debug_text("\nDBG blocks f=")
-        lower_debug_number(d, "", step_function)
-        lower_debug_text("\n")
-        var dbg_b: U64 = 0
-        while dbg_b < __s0_buffer_len(MirBlockRec, state.mir.blocks) {
-            let dbg_block = __s0_buffer_get(MirBlockRec, state.mir.blocks, dbg_b)
-            if dbg_block.function == step_function {
-                lower_debug_text("DBG block id=")
-                lower_debug_number(d, "", dbg_b + 1)
-                lower_debug_number(d, " ord=", dbg_block.ordinal)
-                lower_debug_text(" name=")
-                lower_debug_name(state.mir, dbg_block.name_start, dbg_block.name_end)
-                lower_debug_text("\n")
-            }
-            dbg_b = dbg_b + 1
-        }
-        var dbg_i: U64 = 0
-        while dbg_i < __s0_buffer_len(MirInstrRec, state.mir.instructions) {
-            let dbg_item = __s0_buffer_get(MirInstrRec, state.mir.instructions, dbg_i)
-            if dbg_item.function == step_function && (dbg_item.op == mir_op_cleanup_scope_run() || dbg_item.op == mir_op_cleanup_scope_end()) {
-                lower_debug_text("DBG scopeop id=")
-                lower_debug_number(d, "", dbg_i + 1)
-                lower_debug_number(d, " block=", dbg_item.block)
-                lower_debug_text(" ")
-                lower_debug_block(state.mir, step_function, dbg_item.block)
-                lower_debug_number(d, " a=", dbg_item.a)
-                let dbg_v = lower_step_value_by_ordinal(state.mir, step_function, dbg_item.a - 1)
-                lower_debug_number(d, " vfn=", dbg_v.function)
-                lower_debug_number(d, " vord=", dbg_v.ordinal)
-                lower_debug_number(d, " vkind=", dbg_v.def_kind)
-                lower_debug_number(d, " vblock=", dbg_v.block)
-                lower_debug_number(d, " vitem=", dbg_v.item)
-                let dbg_def = lower_step_def_instruction(state.mir, step_function, dbg_v)
-                lower_debug_number(d, " def=", dbg_def)
-                if dbg_def != 0 {
-                    let dbg_di = __s0_buffer_get(MirInstrRec, state.mir.instructions, dbg_def - 1)
-                    lower_debug_number(d, " def_op=", dbg_di.op)
-                    lower_debug_number(d, " def_block=", dbg_di.block)
-                }
-                lower_debug_text("\n")
-            }
-            dbg_i = dbg_i + 1
-        }
     }
     return Ok(LowerStepCleanupExpansionRec(state: state, next_cleanup: next_cleanup, extra_calls: extra_calls))
 }
@@ -11711,12 +11509,14 @@ fn lower_step_cancel_scopes_n(d: Domain, body0: LowerStepBodyNRec, block: U64, p
         if rec.kind == 5 {
             let part = lower_step_frame_part_at(body.state.mir, body.frame, rec.pos)
             if part.owner != body.frame { return Ok(body) }
-            // A cancel block is entered from the dispatch, not through the
-            // block that began the scope, so only the frame-resident field
-            // dominates it.
-            let loaded = try lower_step_load_field(d, body.state, body.function, block, body.frame_deref, part)
-            body.state = loaded.state
-            let scope_value = loaded.id
+            var scope_value: U64 = 0
+            if !force_load && pi < body.point_count && rec.value >= 1 && rec.value <= body.override_stride { scope_value = __s0_buffer_get(U64, body.point_cancel_values, pi * body.override_stride + rec.value - 1) }
+            if !force_load && scope_value == 0 && rec.value >= 1 && rec.value <= __s0_buffer_len(U64, body.cancel_values) { scope_value = __s0_buffer_get(U64, body.cancel_values, rec.value - 1) }
+            if scope_value == 0 {
+                let loaded = try lower_step_load_field(d, body.state, body.function, block, body.frame_deref, part)
+                body.state = loaded.state
+                scope_value = loaded.id
+            }
             let ran = try lower_add_instr(d, body.state, body.function, block, mir_op_cleanup_scope_run(), 0, 0, 0, scope_value, 0, 0, "")
             body.state = ran.state
             let ended = try lower_add_instr(d, body.state, body.function, block, mir_op_cleanup_scope_end(), 0, 0, 0, scope_value, 0, 0, "")
