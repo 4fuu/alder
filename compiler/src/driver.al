@@ -507,6 +507,7 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
     if kind == 354 { return out_string("a Pending(T) argument must be a direct call to a named function or method") }
     if kind == 355 { return out_string("a Pending(T) argument must call a named function or method, not a constructor, variant, closure, function value, or C import") }
     if kind == 356 { return out_string("the Pending(T) arguments do not share one result type") }
+    if kind == 360 { return out_string("hosted main cannot take an I/O capability yet; use a parameterless main and construct the capability locally") }
     if kind == 310 { return out_string("Option.take requires a mutable place receiver") }
     if kind == 302 { return out_string("implementations must restate every constraint the implementing type declares on the matching type argument") }
     if kind == 144 { if !out_string("ordered collection operation ") || !driver_out_node_name(state, parse, source, start, end, json) { return false }
@@ -606,6 +607,22 @@ fn driver_failure(status: U64, kind: __s0_String, message: __s0_String) -> I32 {
     if status == 2 { return 2 }
     if status == 3 { return 3 }
     return 4
+}
+
+fn driver_verification_failure(diagnostics: __s0_Buffer(MirVerifyDiagRec)) -> I32 {
+    let status = driver_failure(4, "internal", "internal compiler failure: verification refused")
+    if status != 4 || !driver_select(1) { return 3 }
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirVerifyDiagRec, diagnostics) {
+        let diag = __s0_buffer_get(MirVerifyDiagRec, diagnostics, at)
+        if !out_string("alder: MIR verifier phase ") || !out_u64(diag.phase) || !out_string(", kind ") || !out_u64(diag.kind) { return 3 }
+        if !out_string(", function ") || !out_u64(diag.function) || !out_string(", block ") || !out_u64(diag.block) { return 3 }
+        if !out_string(", instruction ") || !out_u64(diag.instruction) || !out_string(", terminator ") || !out_u64(diag.terminator) { return 3 }
+        if !out_string(", operand ") || !out_u64(diag.operand) || !out_string(", type ") || !out_u64(diag.type_id) || !out_string(", declaration ") || !out_u64(diag.declaration) { return 3 }
+        if !out_string(", expected ") || !out_u64(diag.expected) || !out_string(", actual ") || !out_u64(diag.actual) || !out_string(", reference ") || !out_u64(diag.reference) || !out(10) { return 3 }
+        at = at + 1
+    }
+    return status
 }
 
 fn driver_storage_error() -> I32 { return driver_failure(3, "io", "compiler storage failure") }

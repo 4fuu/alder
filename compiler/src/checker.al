@@ -13652,6 +13652,13 @@ fn check_entry_signature(d: Domain, state: State, parse: ParseStore, store: Chec
     while at < __s0_buffer_len(SymbolRec, store.symbols) {
         let symbol = __s0_buffer_get(SymbolRec, store.symbols, at)
         if symbol.source + 1 == source && (symbol.kind == 12 || symbol.kind == 13) && symbol_name_matches_word(state, symbol, "main") {
+            let param_use = use_by_ordinal(store, at + 1, 5, 0)
+            if param_use != 0 {
+                let param = __s0_buffer_get(DeclTypeUseRec, store.uses, param_use - 1)
+                if try type_implements_io_trait(d, state, store, param.checked_type, "Io") {
+                    return check_token_fail(d, state, store, 360, __s0_buffer_get(SyntaxRec, parse.nodes, param.syntax - 1))
+                }
+            }
             var result_role: U64 = 8
             if symbol.kind == 12 { result_role = 6 }
             let result_use = use_by_ordinal(store, at + 1, result_role, 0)
@@ -14253,14 +14260,13 @@ fn type_parameter_is_suspending(state: State, store: CheckStore, param: U64) -> 
     return io && !blocking
 }
 
-// A concrete nominal type implements AsyncIo when an applicable implementation
-// declares that standard trait. Generic implementations are conditional, so
-// the same applicability check the constraint solver uses decides their head.
-fn type_implements_async_io(d: Domain, state: State, store: CheckStore, checked_type: U64) -> Result(Bool, __s0_Error) {
+// Generic implementations are conditional, so use the constraint solver's
+// applicability check for an implementation of the named standard trait.
+fn type_implements_io_trait(d: Domain, state: State, store: CheckStore, checked_type: U64, trait_name: __s0_String) -> Result(Bool, __s0_Error) {
     let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
     if checked.kind != 7 { return Ok(false) }
-    let async_trait = io_trait_symbol_named(state, store, "AsyncIo")
-    if async_trait == 0 { return Ok(false) }
+    let trait_symbol = io_trait_symbol_named(state, store, trait_name)
+    if trait_symbol == 0 { return Ok(false) }
     let count = __s0_buffer_len(U64, store.traits.receiver_index)
     if count == 0 { return Ok(false) }
     var low: U64 = 0
@@ -14275,10 +14281,10 @@ fn type_implements_async_io(d: Domain, state: State, store: CheckStore, checked_
         let rec = __s0_buffer_get(TraitImplRec, store.traits.impls, __s0_buffer_get(U64, store.traits.receiver_index, at) - 1)
         let symbol = trait_impl_receiver_type_symbol(store, rec)
         if symbol > checked.target { return Ok(false) }
-        if symbol == checked.target && rec.trait_builtin == 0 && rec.trait_symbol == async_trait {
+        if symbol == checked.target && rec.trait_builtin == 0 && rec.trait_symbol == trait_symbol {
             let empty = try __s0_buffer_new(InferenceBindingRec, d)
             let seeded = try __s0_buffer_append(InferenceBindingRec, d, empty, InferenceBindingRec(param: 1, checked_type: checked_type))
-            let constraint = TraitConstraintRec(owner: 0, param: 1, trait_builtin: 0, trait_symbol: async_trait, first_arg: 0, arg_count: 0, syntax: 0)
+            let constraint = TraitConstraintRec(owner: 0, param: 1, trait_builtin: 0, trait_symbol: trait_symbol, first_arg: 0, arg_count: 0, syntax: 0)
             if try trait_impl_applies(d, store, rec, constraint, seeded, 0) { return Ok(true) }
         }
         at = at + 1
@@ -14341,7 +14347,7 @@ fn type_is_suspending_capability(d: Domain, state: State, store: CheckStore, che
         at = at + 1
     }
     if checked.kind != 7 { return Ok(suspension_probe_none()) }
-    if try type_implements_async_io(d, state, store, checked_type) { return Ok(suspension_probe_suspends()) }
+    if try type_implements_io_trait(d, state, store, checked_type, "AsyncIo") { return Ok(suspension_probe_suspends()) }
     let symbol = __s0_buffer_get(SymbolRec, store.symbols, checked.target - 1)
     if symbol.kind != 2 && symbol.kind != 3 { return Ok(suspension_probe_none()) }
     let bindings = try nominal_type_bindings(d, store, checked.target, checked)

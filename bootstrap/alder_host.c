@@ -695,6 +695,9 @@ bool alderhost_sources_sort(void) {
         qsort(context->sources, (size_t)context->source_count,
               sizeof(*context->sources), alderhost_compare_paths);
     }
+    /* Project reclose reseeds the entry in the sorted snapshot. */
+    context->project_entry_source = UINT64_C(0);
+    context->project_entry_source_original_set = false;
     return true;
 }
 

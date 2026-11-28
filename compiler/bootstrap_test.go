@@ -299,9 +299,15 @@ int abi_sum(abi_pair pair);
 	})
 
 	t.Run("no-repair", func(t *testing.T) {
-		got := runProductionCompiler(t, exe, map[string]string{"library.al": "fn helper() -> I32 { return 0 }\n"}, "compile", "--emit=c", "library.al")
-		if got.status != 4 || got.stdout != "" || !strings.Contains(got.stderr, "internal compiler failure") {
+		files := map[string]string{"library.al": "fn helper() -> I32 { return 0 }\n"}
+		const missingEntry = "MIR verifier phase 10, kind 70"
+		got := runProductionCompiler(t, exe, files, "compile", "--emit=c", "library.al")
+		if got.status != 4 || got.stdout != "" || !strings.Contains(got.stderr, "internal compiler failure") || !strings.Contains(got.stderr, missingEntry) {
 			t.Fatalf("unhosted library emitted bytes or wrong class: %+v", got)
+		}
+		got = runProductionCompiler(t, exe, files, "compile", "--format=json", "--emit=c", "library.al")
+		if got.status != 4 || !strings.Contains(got.stdout, `"failure":{"kind":"internal","message":"internal compiler failure: verification refused"}`) || !strings.Contains(got.stderr, missingEntry) {
+			t.Fatalf("verifier rejection did not keep JSON response and stderr details separate: %+v", got)
 		}
 	})
 }
@@ -682,7 +688,7 @@ func TestCommittedSourceBootstrap(t *testing.T) {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256(bootstrap)
-	if got, want := fmt.Sprintf("%x", digest), "f052ea4e345ebf0a4d6fc4b377928d2e427cc0adfdfe9247910e7faa75d05dc7"; got != want {
+	if got, want := fmt.Sprintf("%x", digest), "580787ebfd2519e597084791d2bd87f6f3a63863af9da23dba9cece694b7adde"; got != want {
 		t.Fatalf("bootstrap/alder.c digest = %s, want %s", got, want)
 	}
 	// The shared splitter feeds both the stage-0 build in regenerate.sh and

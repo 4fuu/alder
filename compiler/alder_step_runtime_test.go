@@ -529,3 +529,98 @@ pub fn main() -> I32 {
 		})
 	}
 }
+
+func TestAlderHostedStepEntry(t *testing.T) {
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, cc, root)
+	env := sysrootEnv(filepath.Join(root, "sysroot"))
+
+	t.Run("direct-main", func(t *testing.T) {
+		files := map[string]string{"main.al": "fn main() -> I32 { return 37 }\n"}
+		got := runProductionCompiler(t, exe, files, "compile", "--emit=c", "main.al")
+		if got.status != 0 || !strings.Contains(got.stdout, "return alder_fn_main_") || strings.Contains(got.stdout, "alder_executor_run(NULL)") {
+			t.Fatalf("non-suspending main did not keep a direct entry: %+v", got)
+		}
+	})
+
+	t.Run("local-sim-clock", func(t *testing.T) {
+		files := map[string]string{"alder.toml": taskManifest, "src/main.al": `module hello.main
+import std.io { Io }
+import std.test { SimIo }
+
+fn elapsed(sim: SimIo) -> I32 {
+    sim.sleep(0, 37)
+    let now = sim.monotonic()
+    if now.seconds != 0 || now.nanos != 37 { return 98 }
+    return 37
+}
+
+pub fn main() -> I32 {
+    let sim = SimIo.new()
+    return elapsed(sim)
+}
+`}
+		got := runProductionCompilerEnv(t, exe, t.TempDir(), env, files, "run")
+		if got.status != 37 || got.stdout != "" || got.stderr != "" {
+			t.Fatalf("hosted SimIo step did not return its elapsed virtual time: %+v", got)
+		}
+	})
+
+	t.Run("early-task-group-return", func(t *testing.T) {
+		dir := t.TempDir()
+		files := taskProject(taskTestCapability + `import c "fixture_task.h" as fixture {
+    raw fn park = "alder_task_park"() -> Unit
+    raw fn shield = "fixture_shield"() -> Unit
+    raw fn observe = "fixture_observe"(byte: c.Int) -> Unit
+    raw fn yield = "fixture_yield"() -> Unit
+}
+
+fn child(id: I32) -> Unit {
+    unsafe c { fixture.shield() }
+    unsafe c { fixture.park() }
+    unsafe c { fixture.observe(id.to_c_int()) }
+}
+
+pub fn main() -> I32 {
+    let io = TestCapability()
+    using tasks = TaskGroup.new(io)
+    tasks.start(child(49))
+    tasks.start(child(50))
+    unsafe c { fixture.yield() }
+    unsafe c { fixture.park() }
+    return 37
+}
+`)
+		files["fixture_task.h"] = `#include <stdio.h>
+#include "alder.h"
+static inline void fixture_yield(void) { alder_task_yield(); }
+static inline void fixture_shield(void) { alder_task_shield_push(); }
+static inline void fixture_observe(int value) {
+    alder_task_shield_pop();
+    (void)putchar(alder_task_cancelled() ? value : 'X');
+}
+`
+		got := runProductionCompilerEnv(t, exe, dir, append(env, "CPATH="+dir), files, "run")
+		if got.status != 37 || got.stdout != "21" || got.stderr != "" {
+			t.Fatalf("hosted main did not cancel parked children newest first before returning: %+v", got)
+		}
+	})
+
+	for _, tc := range []struct{ module, capability string }{{"std.test", "SimIo"}, {"std.io", "Blocking"}} {
+		t.Run("reject-"+tc.capability+"-parameter", func(t *testing.T) {
+			files := map[string]string{"alder.toml": taskManifest, "src/main.al": "module hello.main\nimport " + tc.module + " { " + tc.capability + " }\n\npub fn main(io: " + tc.capability + ") -> I32 { return 0 }\n"}
+			got := runProductionCompilerEnv(t, exe, t.TempDir(), env, files, "check")
+			const want = "error[SEM0001]: hosted main cannot take an I/O capability yet; use a parameterless main and construct the capability locally"
+			if got.status != 1 || got.stdout != "" || !strings.Contains(got.stderr, want) {
+				t.Fatalf("hosted capability parameter did not get a source diagnostic: %+v", got)
+			}
+		})
+	}
+}

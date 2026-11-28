@@ -685,7 +685,7 @@ fn cgen_emit_program_bodies(d: Domain, initial: CgenWriter, store: MirStore) -> 
 fn cgen_emit_host_entry(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, main: U64) -> Result(CgenWriter, __s0_Error) {
     var out = try cgen_put(d, initial, "int32_t alder_program_entry(void *host_context) \{\n  if (host_context == NULL) \{ return ALDER_PROGRAM_FAILURE_STATUS; }\n")
     let step_index = cgen_step_index_for_direct(store, main)
-    if step_index != 0 && __s0_buffer_get(MirStepRec, store.steps, step_index - 1).p_count == 0 {
+    if step_index != 0 {
         let step = __s0_buffer_get(MirStepRec, store.steps, step_index - 1)
         let frame_fields = mir_type_part_count(store, step.frame, mir_type_part_field())
         out = try cgen_put(d, out, "  AlderDomain alder_root = \{0};\n  if (!alder_domain_init(&alder_root, NULL)) \{ return ALDER_PROGRAM_FAILURE_STATUS; }\n  ")
