@@ -336,8 +336,10 @@ by the backend exactly like `alder_domain_alloc` and `alder_cleanup_run`.
   calls `alder_task_release(task_id)`, destroys the root domain, and returns
   the program status. A false result is the blocked-program report and the
   entry does not read `out`. The root activation is a task like any other;
-  the runtime has no task-less root activation. A synchronous `main` keeps
-  the existing direct entry.
+  the runtime has no task-less root activation. The hosted entry is async
+  exactly when `main` is a suspending instance, whether by its signature or
+  because its body calls suspending instances; a `main` that is not a
+  suspending instance keeps the existing direct entry.
 - A suspending instance emits only its step function and thunk; no direct
   callable body is emitted for it, so a park marker never reaches generated
   C as a call. Nothing legitimate references a direct twin: function values
@@ -524,6 +526,68 @@ lazily created internal group list only to unlink a task at
 `alder_task_release`; the record is freed when its last task is released and
 carries no cancellation or join policy. Gate 9.4 owns the group record, its
 lifetime, and the create/cancel/join surface.
+
+#### Gate 9.4c group, task, and timer addenda
+
+These entries extend the gate 9.2 task runtime for the structured-concurrency
+surface. They are additive; no gate 9.2 signature changes. Entries observing
+the current task remain step-only, except `alder_group_*` and
+`alder_executor_set_default_hooks`, which may be called outside a step.
+
+```c
+void alder_executor_set_default_hooks(const AlderExecutorHooks *hooks);
+uint64_t alder_group_create(void);
+void alder_group_cancel(uint64_t group);
+uint64_t alder_group_next(uint64_t group);
+void alder_group_release(uint64_t group);
+uint64_t alder_task_spawn_index(uint64_t task);
+void alder_task_own_domain(uint64_t task);
+void alder_task_release_spawned(uint64_t task);
+AlderSlice alder_task_await_result_slice(uint64_t offset);
+bool alder_task_awaited_cancelled(void);
+void alder_task_release_awaited(void);
+uint64_t alder_executor_clock(void);
+bool alder_timer_in(uint64_t delay);
+void alder_timer_clear(void);
+```
+
+- `alder_group_create` returns a stable group id. The record owns the live
+  child list, the group cancel flag, and join order. `alder_group_cancel`
+  sets the cancel flag on every live child; it never runs user code.
+  `alder_group_next` returns the newest live child id, or zero after every
+  child has been released. `alder_group_release` frees the record and is a
+  contract violation while a child is still live.
+- `alder_task_spawn_index` returns the one-based creation index used by the
+  `SimIo` blocked-task report; it is stable for the task's lifetime.
+- `alder_task_own_domain` transfers the spawned root activation domain to the
+  task record. `alder_task_release_spawned` then releases the task and
+  destroys that domain after the caller has copied the result. A task that
+  never called `alder_task_own_domain` keeps the gate 9.2 caller-owned domain
+  contract.
+- `alder_task_await_result_slice(offset)` returns a one-element view of the
+  most recently awaited child's root frame at `offset`, which the spawn
+  lowering computes as the frame's `out` field. The caller copies the value
+  into its own domain before `alder_task_release_awaited`.
+  `alder_task_awaited_cancelled` reports that the awaited child was canceled
+  and has no result. `alder_task_release_awaited` releases that child through
+  the spawned-task path. All three are contract violations without a
+  completed await.
+- `alder_executor_clock` reads the executor's monotonic nanosecond clock. It
+  starts at zero and never moves backwards. `alder_timer_in(delay)` registers
+  `clock + delay` on the current task's wakeup, saturating below
+  `UINT64_MAX`; zero registers the current clock and `UINT64_MAX` is the
+  no-deadline sentinel. `alder_timer_clear` removes the current task's
+  registrations. Registration is followed by the park marker, as with
+  `alder_timer_at`.
+- `alder_executor_set_default_hooks` copies a hook record for a later
+  `alder_executor_run(NULL)`; it is how a `SimIo` test installs the idle
+  diagnostic without changing the generated entry. A NULL record clears it.
+  The runtime copies the record and does not retain the caller's storage.
+
+`alder_task_complete` and `alder_task_set_result_offset` were considered and
+are deliberately not pinned: completion is already observable through the
+await registration, and the result offset is a lowering constant passed to
+`alder_task_await_result_slice`, so no task record field is needed.
 
 ### Frame-resident cleanup cursors
 

@@ -60,7 +60,8 @@ pub type TaskGroup(I: type(Io, AsyncIo)) {
 
 /// Affine, group-scoped handle to one spawned child.
 pub type Task(T: type) {
-    // private: group, child
+    // private: group, child, out_offset (the spawned frame's out field
+    // offset, recorded by spawn lowering; gate 9.4c await handoff)
 }
 
 /// Declaration-only parameter type of the five standard task operations.
