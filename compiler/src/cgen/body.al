@@ -1666,7 +1666,7 @@ fn cgen_emit_cleanup_cursor(d: Domain, initial: CgenWriter, store: MirStore, ind
             out = try cgen_put_value_read(d, out, store, indexes, item.function, call.continuation)
             out = try cgen_put(d, out, ";\n")
         }
-        out = try cgen_put(d, out, "      return (")
+        out = try cgen_put(d, out, "      alder_task_shield_push();\n      return (")
         out = try cgen_put_type(d, out, store, status_type)
         out = try cgen_put(d, out, ")\{ .alder_tag = (uint32_t)1 };\n    }\n")
         row_at = row_at + 1

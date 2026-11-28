@@ -166,6 +166,41 @@ pub fn main() -> I32 {
 `, "321")
 	})
 
+	t.Run("completed-child-early-return", func(t *testing.T) {
+		expectSimioE2E(t, "completed child early return", `type Marker {
+    io: SimIo
+    tag: U8
+}
+
+impl Cleanup for Marker {
+    fn cleanup(take self) -> Unit {
+        let text: Array(U8, 1) = [self.tag]
+        let _ = self.io.write_stdout(text.slice(0, 1))
+        return
+    }
+}
+
+fn child(io: SimIo, tag: U8) -> Unit {
+    using marker = Marker(io: io, tag: tag)
+    let text: Array(U8, 1) = [tag]
+    let _ = io.write_stdout(text.slice(0, 1))
+    return
+}
+
+fn check(sim: SimIo) -> I32 {
+    using tasks = TaskGroup.new(sim)
+    using first = tasks.spawn(child(sim, 49))
+    yield(sim)
+    return 0
+}
+
+pub fn main() -> I32 {
+    let sim = SimIo.seeded(0)
+    return check(sim)
+}
+`, "11")
+	})
+
 	t.Run("timeout-expiry", func(t *testing.T) {
 		expectSimioE2E(t, "timeout expiry", `fn nap(sim: SimIo, millis: U64) -> U64 {
     sleep(sim, Duration.millis(millis))
