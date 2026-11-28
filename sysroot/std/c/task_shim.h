@@ -79,4 +79,8 @@ static inline void task_release_awaited(void) {
 
 static inline void task_yield_current(void) { alder_task_yield(); }
 
+static inline int task_cancelled_now(void) {
+    return alder_task_cancelled() ? 1 : 0;
+}
+
 #endif /* ALDER_TASK_SHIM_H */

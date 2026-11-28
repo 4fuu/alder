@@ -28,10 +28,6 @@ static inline void task_timer_clear(void) { alder_timer_clear(); }
 
 static inline unsigned long long task_clock_now(void) { return (unsigned long long)alder_executor_clock(); }
 
-static inline int task_cancelled_now(void) {
-    return alder_task_cancelled() ? 1 : 0;
-}
-
 static inline unsigned long long task_spawn_index(unsigned long long task) {
     return (unsigned long long)alder_task_spawn_index((uint64_t)task);
 }

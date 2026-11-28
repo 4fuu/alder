@@ -21,6 +21,7 @@ import c "std/c/task_shim.h" as taskrt {
     raw fn await_parkable = "task_await_parkable"(child: c.ULongLong) -> c.Int
     raw fn release_spawned = "task_release_spawned"(child: c.ULongLong) -> Unit
     raw fn yield_current = "task_yield_current"() -> Unit
+    raw fn cancelled_now = "task_cancelled_now"() -> c.Int
 }
 
 import c "alder.h" as runtime {
@@ -123,9 +124,8 @@ fn join_next(I: type(Io, AsyncIo), io: I, group: U64) -> Unit {
         unsafe c { taskrt.group_release(group_id) }
         return
     }
-    let child_id = child.to_c_ulonglong()
-    unsafe c { taskrt.cancel(child_id) }
     join_wait(io, child)
+    let child_id = child.to_c_ulonglong()
     unsafe c { taskrt.release_spawned(child_id) }
     join_next(io, group)
     return
@@ -147,6 +147,8 @@ impl(T: type) Cleanup for Task(T) {
     /// Returns the child to its group without waiting. The group owns the
     /// runtime record, so there is no release step here.
     fn cleanup(take self) -> Unit {
+        let child_id = self.child.to_c_ulonglong()
+        unsafe c { taskrt.cancel(child_id) }
         return
     }
 }

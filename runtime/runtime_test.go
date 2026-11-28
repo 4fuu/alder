@@ -22,7 +22,7 @@ var strictFlags = []string{
 
 // testPrograms are the runtime behavior test programs, one per runtime area.
 // Each program is added to this list as its runtime section lands.
-var testPrograms = []string{"domains", "arithmetic", "bounds", "cleanup", "table", "utf8", "hostargs", "hash", "task", "task_pool", "task_lanes", "task_blocking"}
+var testPrograms = []string{"domains", "arithmetic", "bounds", "cleanup", "table", "utf8", "hostargs", "hash", "task", "task_pool", "task_lanes", "task_blocking", "task_idle"}
 
 func findCompiler(t *testing.T) string {
 	t.Helper()
@@ -241,11 +241,37 @@ func TestRuntimeTaskThreadsTSan(t *testing.T) {
 	}
 	extra := []string{"-fsanitize=thread", "-g", "-O1", "-fno-omit-frame-pointer"}
 	object := buildRuntimeObject(t, cc, extra...)
-	for _, name := range []string{"task", "task_pool", "task_lanes", "task_blocking"} {
+	for _, name := range []string{"task", "task_pool", "task_lanes", "task_blocking", "task_idle"} {
 		name := name
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			compileAndRun(t, cc, object, name, extra...)
 		})
+	}
+}
+
+// TestSimIoDeadlockText pins the SimIo idle panic text independently of the
+// Alder lowering: the header-only hook panics with the fixed first line and a
+// blocked-task line carrying the task's one-based spawn index.
+func TestSimIoDeadlockText(t *testing.T) {
+	cc := findCompiler(t)
+	object := buildRuntimeObject(t, cc)
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "task_sim_text.exe")
+	args := append(append([]string{}, strictFlags...),
+		"-pthread", "-I", "c", "-I", filepath.Join("..", "sysroot"),
+		filepath.Join("testdata", "task_sim_text.c"), object, "-o", exe)
+	if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+		t.Fatalf("compile task_sim_text.c: %v\n%s", err, out)
+	}
+	run := exec.Command(exe)
+	output, err := run.CombinedOutput()
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 101 {
+		t.Fatalf("SimIo deadlock exit = %v, want 101\n%s", err, output)
+	}
+	want := "panic: SimIo deadlock\n  blocked task 1\n"
+	if string(output) != want {
+		t.Fatalf("SimIo deadlock text = %q, want %q", output, want)
 	}
 }
