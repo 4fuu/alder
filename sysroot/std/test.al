@@ -18,7 +18,7 @@ import std.path { OsString, Path }
 import std.random
 import std.time { Duration }
 
-import c "std/c/task_shim.h" as simrt {
+import c "std/c/sim_shim.h" as simrt {
     raw fn install_hooks = "task_install_sim_hooks"() -> Unit
     raw fn clock_now = "task_clock_now"() -> c.ULongLong
     raw fn timer_in = "task_timer_in"(delay: c.ULongLong) -> c.Int
