@@ -3219,7 +3219,12 @@ fn mir_vframe_phase6(d: Domain, store: MirStore, indexes: MirVIndexes, out0: __s
                             if x.op == mir_op_load() { let part = mir_vframe_field_part_of(store, indexes, function, x.place, step.frame_param)
                                 if part != 0 { let pos = mir_vframe_field_pos_part(scan, store, frame_index, part)
                                     let kind = mir_vframe_field_kind_pos(scan, frame_index, pos)
-                                    if kind == mir_vframe_field_callee() || kind == mir_vframe_field_callee_owner() || kind == mir_vframe_field_domain() || kind == mir_vframe_field_local() || kind == mir_vframe_field_temp() || kind == mir_vframe_field_cleanup() || kind == mir_vframe_field_scope() { loads = try __s0_buffer_append(U64, d, loads, pos) } } }
+                                    if kind == mir_vframe_field_callee() || kind == mir_vframe_field_callee_owner() || kind == mir_vframe_field_domain() || kind == mir_vframe_field_local() || kind == mir_vframe_field_temp() || kind == mir_vframe_field_cleanup() || kind == mir_vframe_field_scope() {
+                                        var dup_load = false
+                                        var dl: U64 = 0
+                                        while dl < __s0_buffer_len(U64, loads) { if __s0_buffer_get(U64, loads, dl) == pos { dup_load = true }
+                                            dl = dl + 1 }
+                                        if !dup_load { loads = try __s0_buffer_append(U64, d, loads, pos) } } } }
                             li = li + 1 }
                         let t = mir_vindex_term(indexes, function, current)
                         var next: U64 = 0
