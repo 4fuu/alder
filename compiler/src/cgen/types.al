@@ -209,9 +209,20 @@ fn cgen_scope_slot_for_begin(store: MirStore, function: U64, instruction: U64) -
 }
 
 fn cgen_scope_slot_for_value(store: MirStore, function: U64, value: U64) -> U64 {
-    if value == 0 || value > __s0_buffer_len(MirValueRec, store.values) { return 0 }
-    let v = __s0_buffer_get(MirValueRec, store.values, value - 1)
-    if v.function != function || v.def_kind != mir_value_def_instruction() || v.item == 0 { return 0 }
+    if value == 0 { return 0 }
+    // MIR value IDs are function-local ordinals, not buffer positions.
+    var v = __s0_buffer_get(MirValueRec, store.values, 0)
+    var found = false
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirValueRec, store.values) {
+        let item = __s0_buffer_get(MirValueRec, store.values, at)
+        if item.function == function && item.ordinal == value - 1 {
+            v = item
+            found = true
+            at = __s0_buffer_len(MirValueRec, store.values)
+        } else { at = at + 1 }
+    }
+    if !found || v.def_kind != mir_value_def_instruction() || v.item == 0 { return 0 }
     let def = lower_def_instr_for_cgen(store, v)
     if def == 0 { return 0 }
     let item = __s0_buffer_get(MirInstrRec, store.instructions, def - 1)
