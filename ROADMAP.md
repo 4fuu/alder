@@ -2393,7 +2393,10 @@ earlier gate. The representation family is fixed by
   supported, sockets, DNS, and subprocess waiting behind the existing `Io`
   surface (public `std.net` remains Milestone 10); `std.test.SimIo` virtual
   time, quiescence, deadlock reporting, and the step-visible executor-clock
-  read required for relative sleeps; one source instantiated under both
+  read required for relative sleeps; hosted capability injection into `main`
+  (`Blocking`, `Evented`, and `SimIo` via root-step construction) as specified
+  in [Modules and Builds](docs/modules-and-builds.md#entry-points-and-tests);
+  one source instantiated under both
   `Blocking` and `Evented` with identical results. Status: pending.
 - **9.8 Exit evidence and audit** — high task counts, deep recursion, bounded
   stack and measured task storage, measured dual-instance code size,

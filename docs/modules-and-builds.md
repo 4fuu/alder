@@ -496,6 +496,12 @@ Examples in doc comments are compiled and run by `alder test`.
 A binary target selects one module exporting `main`. `main` may first take one
 I/O capability: `std.io.Blocking` runs it without an executor, and
 `std.io.Evented` starts the hosted executor and runs `main` as its root task.
+Hosted capability injection into `main` (including `SimIo`, constructed by the
+generated root step with the default seed because the host cannot construct an
+Alder test capability) is specified here but unimplemented until gate 9.7;
+until it lands, a `main` with a capability parameter is rejected with a
+diagnostic directing the author to the parameterless form that constructs the
+capability locally, which selects the async entry through its suspending body.
 It may then take zero parameters or one `[String]` or `[std.env.OsString]`
 argument, and it returns `Unit`, `I32`, `Result(Unit, E)`, or `Result(I32, E)`,
 where `E` implements `Display`.
