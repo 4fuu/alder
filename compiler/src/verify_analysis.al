@@ -3753,6 +3753,24 @@ fn mir_vframe_state_saves_scope(store: MirStore, indexes: MirVIndexes, function:
     return false
 }
 
+fn mir_anchor_dbg(d: Domain, label: __s0_String, value: U64) -> Unit {
+    var at: U64 = 0
+    while at < len(label) {
+        let _ = unsafe c { alderhost_stderr_byte(label[at]) }
+        at = at + 1
+    }
+    let text = match lower_decimal_name(d, "", value) {
+        Ok(digits) => digits
+        Err(_) => "?"
+    }
+    at = 0
+    while at < len(text) {
+        let _ = unsafe c { alderhost_stderr_byte(text[at]) }
+        at = at + 1
+    }
+    return
+}
+
 fn mir_vframe_phase7_anchors(d: Domain, store: MirStore, indexes: MirVIndexes, out0: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
     var out = out0
     let scanned = try mir_vframe_scan(d, store, indexes)
@@ -3776,6 +3794,10 @@ fn mir_vframe_phase7_anchors(d: Domain, store: MirStore, indexes: MirVIndexes, o
                     let anchor = mir_vframe_begin_anchor(store, indexes, function, scan, frame_index, step.frame_param, x.result)
                     if anchor.pos == 0 {
                         if mir_vframe_begin_has_scope_store(store, indexes, function, scan, frame_index, step.frame_param, x.result) {
+                            mir_anchor_dbg(d, "\nDBG anchor0 f=", function)
+                            mir_anchor_dbg(d, " block=", block)
+                            mir_anchor_dbg(d, " iid=", iid)
+                            mir_anchor_dbg(d, " begin=", x.result)
                             out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_cleanup(), mir_vdiag_frame_scope_anchor(), function, block, iid, 0, 0, 0, function, 0, 0, 0))
                         }
                     } else {
@@ -3788,6 +3810,13 @@ fn mir_vframe_phase7_anchors(d: Domain, store: MirStore, indexes: MirVIndexes, o
                                 let use = __s0_buffer_get(MirInstrRec, store.instructions, uid - 1)
                                 if (use.op == mir_op_cleanup_push() || use.op == mir_op_cleanup_scope_run() || use.op == mir_op_cleanup_scope_end()) && use.a == x.result {
                                     if !try mir_vframe_anchor_precedes(d, store, indexes, function, anchor, ub, uid) {
+                                        mir_anchor_dbg(d, "\nDBG anchoruse f=", function)
+                                        mir_anchor_dbg(d, " useblock=", ub)
+                                        mir_anchor_dbg(d, " useiid=", uid)
+                                        mir_anchor_dbg(d, " begin=", x.result)
+                                        mir_anchor_dbg(d, " anchorpos=", anchor.pos)
+                                        mir_anchor_dbg(d, " anchorblock=", anchor.block)
+                                        mir_anchor_dbg(d, " op=", use.op)
                                         out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_cleanup(), mir_vdiag_frame_scope_anchor(), function, ub, uid, 0, 0, 0, function, 0, 0, 0))
                                     }
                                 }

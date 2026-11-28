@@ -145,7 +145,20 @@ fn mir_v7_place_conflict(store: MirStore, indexes: MirVIndexes, nodes: __s0_Buff
     return false
 }
 
-fn mir_v7_one(d: Domain, store: MirStore, indexes: MirVIndexes, function: U64, scope: U64, node_base: U64, run_base: U64, analysis0: MirV7Analysis) -> Result(MirV7Analysis, __s0_Error) { var analysis = analysis0
+// A frame-resident scope is tracked by the slot that holds it: a run or end
+// through a reload of the same slot belongs to whichever instance of that
+// slot is open on the path. Status absent means another instance owns the
+// slot on this path, so the reload does not apply here.
+fn mir_v7_same_scope(store: MirStore, indexes: MirVIndexes, function: U64, scan: MirVFrameScan, frame_index: U64, frame_param: U64, scope: U64, scope_anchor: U64, operand: U64, op: U64, status: U64) -> Bool {
+    if operand == scope { return true }
+    if status == mir_v7_absent() { return false }
+    if op != mir_op_cleanup_scope_run() && op != mir_op_cleanup_scope_end() { return false }
+    if scope_anchor == 0 { return false }
+    return mir_vframe_scope_value_anchor(store, indexes, function, scan, frame_index, frame_param, operand) == scope_anchor
+}
+
+fn mir_v7_one(d: Domain, store: MirStore, indexes: MirVIndexes, function: U64, scope: U64, node_base: U64, run_base: U64, scan: MirVFrameScan, frame_index: U64, frame_param: U64, analysis0: MirV7Analysis) -> Result(MirV7Analysis, __s0_Error) { var analysis = analysis0
+let scope_anchor = mir_vframe_scope_value_anchor(store, indexes, function, scan, frame_index, frame_param, scope)
 var out = analysis.diagnostics
 var nodes = analysis.nodes
 var run_sets = analysis.run_sets
@@ -187,11 +200,11 @@ nodes = removed.nodes
 valid = status == mir_v7_open()
 if valid { valid = removed.found }
 if valid { active = removed.active } }
-if x.op == mir_op_cleanup_scope_run() && x.a == scope { relevant = true
+if x.op == mir_op_cleanup_scope_run() && mir_v7_same_scope(store, indexes, function, scan, frame_index, frame_param, scope, scope_anchor, x.a, x.op, status) { relevant = true
 valid = status == mir_v7_open()
 if valid { if !mir_v7_run_set_has(run_sets, run_base, function, iid, active) { run_sets = try __s0_buffer_append(MirV7RunSet, d, run_sets, MirV7RunSet(function: function, instruction: iid, active: active)) }
 status = mir_v7_running() } }
-if x.op == mir_op_cleanup_scope_end() && x.a == scope { relevant = true
+if x.op == mir_op_cleanup_scope_end() && mir_v7_same_scope(store, indexes, function, scan, frame_index, frame_param, scope, scope_anchor, x.a, x.op, status) { relevant = true
 valid = status == mir_v7_running()
 if valid { status = mir_v7_ended()
 active = 0 } }
@@ -243,14 +256,22 @@ return Ok(analysis) }
 
 fn mir_v7_analyze(d: Domain, store: MirStore, indexes: MirVIndexes, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(MirV7Analysis, __s0_Error) {
 var analysis = MirV7Analysis(nodes: try __s0_buffer_new(MirV7Node, d), run_sets: try __s0_buffer_new(MirV7RunSet, d), diagnostics: initial)
+let scanned = try mir_vframe_scan(d, store, indexes)
+let scan = scanned.scan
 var function: U64 = 1
 while function <= __s0_buffer_len(MirFunctionRec, store.functions) { let node_base = __s0_buffer_len(MirV7Node, analysis.nodes)
 let run_base = __s0_buffer_len(MirV7RunSet, analysis.run_sets)
+var frame_index: U64 = 0
+var frame_param: U64 = 0
+let step_index = mir_vframe_step_for(scan, function)
+if step_index != 0 { let step = __s0_buffer_get(MirVFrameStep, scan.steps, step_index - 1)
+    frame_index = mir_vframe_frame_index(scan, step.frame_type)
+    frame_param = step.frame_param }
 var value: U64 = 1
 while mir_vindex_value(indexes, function, value) != 0 { let vi = mir_vindex_value(indexes, function, value)
 let v = __s0_buffer_get(MirValueRec, store.values, vi - 1)
 if mir_vtype_kind(store, v.value_type) == mir_type_kind_cleanup_scope() && v.def_kind == mir_value_def_instruction() { let iid = mir_v6_instruction_for_value(store, indexes, v)
-if iid != 0 && __s0_buffer_get(MirInstrRec, store.instructions, iid - 1).op == mir_op_cleanup_scope_begin() { analysis = try mir_v7_one(d, store, indexes, function, value, node_base, run_base, analysis) } }
+if iid != 0 && __s0_buffer_get(MirInstrRec, store.instructions, iid - 1).op == mir_op_cleanup_scope_begin() { analysis = try mir_v7_one(d, store, indexes, function, value, node_base, run_base, scan, frame_index, frame_param, analysis) } }
 value = value + 1 }
 function = function + 1 }
 return Ok(analysis) }
