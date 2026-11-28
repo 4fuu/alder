@@ -2362,7 +2362,12 @@ earlier gate. The representation family is fixed by
   checking, `TaskGroup`/`Task(T)`/`start`, group-exit join and cancellation,
   `timeout`/`race`/`blocking`/`yield`, `check_cancel` and `CancellationToken`;
   nested-group, early-return, failed-`try`, and cleanup-order evidence.
-  Status: pending. Slice B landed the frontend surface only: `await` is a
+  Status: in progress. Slice C landed the spawn/await handoff at `dbd1f14`:
+  `task.take_result` with the spawn-recorded private out-offset, frame-stable
+  storage for borrowed locals in spawned steps, frame-domain cleanup
+  contexts, and await disarming the child handle after copying the result
+  and before release; the minimal spawn-argument and await-return programs
+  run end to end. Slice B landed the frontend surface only: `await` is a
   prefix operator with no method form, recognized by declaration source, and
   `try await` composes right-to-left; `Pending(T)` is restricted to the five
   standard operations' parameter lists with direct-call arguments; and
@@ -2374,8 +2379,9 @@ earlier gate. The representation family is fixed by
   `BlockingIo`; `CancellationToken` stays a placeholder because a copyable
   value cannot observe an affine source before the source-scoped capability
   category and group-owned storage land. Transfer-category and
-  portable-argument checking, lowering the task operations, group-exit
-  join/cancellation, and the token runtime remain gate 9.4 work. Slice A
+  portable-argument checking, group-exit join/cancellation, the free
+  combinators, and the token runtime remain gate 9.4 work; the full SimIo
+  end-to-end list is pending on `m9-task-groups`. Slice A
   landed the MIR 7 `task.spawn` operation at `38cc0fa`: Go/Alder lockstep
   parse/print/verify, the create-start-handle cgen lowering against the real
   runtime, and the version convention (mir 7 only for modules containing the
